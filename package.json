@@ -1,0 +1,27 @@
+{
+  "name": "killa-famq",
+  "version": "1.0.0",
+  "description": "Русскоязычный Discord-админ бот KILLA FAMQ.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "invite": "node src/invite-link.js",
+    "deploy": "node src/deploy-commands.js",
+    "profile": "node src/update-profile.js",
+    "rules:post": "node src/post-rules.js",
+    "role-form:post": "node src/post-role-form.js",
+    "sales-form:post": "node src/post-sales-form.js",
+    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/form-components.js && node --check src/invite-link.js && node --check src/post-role-form.js && node --check src/post-rules.js && node --check src/post-sales-form.js && node --check src/update-profile.js && node --check src/commands.js && node --check src/config.js && node --check src/store.js"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.4",
+    "dotenv": "^17.2.3"
+  },
+  "overrides": {
+    "undici": "6.27.0"
+  }
+}

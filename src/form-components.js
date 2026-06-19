@@ -1,0 +1,113 @@
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} from 'discord.js';
+
+export const FORM_IDS = Object.freeze({
+  roleButton: 'killa_role_request_open',
+  roleModal: 'killa_role_request_submit',
+  roleNickname: 'role_nickname',
+  roleStatic: 'role_static',
+  roleScreenshot: 'role_screenshot',
+  salesButton: 'killa_sales_lot_open',
+  salesModal: 'killa_sales_lot_submit',
+  salesItem: 'sales_item',
+  salesPrice: 'sales_price',
+  salesDescription: 'sales_description',
+  salesScreenshot: 'sales_screenshot',
+});
+
+/**
+ * Creates a button action row.
+ * @param {string} customId - Button custom ID.
+ * @param {string} label - Button label.
+ * @param {ButtonStyle} style - Button style.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Button action row.
+ * @skill-verified
+ */
+function createButtonRow(customId, label, style) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(customId)
+      .setLabel(label)
+      .setStyle(style),
+  );
+}
+
+/**
+ * Creates a text input action row for a modal.
+ * @param {string} customId - Text input custom ID.
+ * @param {string} label - Text input label.
+ * @param {TextInputStyle} style - Text input style.
+ * @param {boolean} required - Whether the field is required.
+ * @param {number} maxLength - Maximum field length.
+ * @param {string} placeholder - Field placeholder.
+ * @returns {ActionRowBuilder<TextInputBuilder>} Text input action row.
+ * @skill-verified
+ */
+function createTextInputRow(customId, label, style, required, maxLength, placeholder) {
+  return new ActionRowBuilder().addComponents(
+    new TextInputBuilder()
+      .setCustomId(customId)
+      .setLabel(label)
+      .setStyle(style)
+      .setRequired(required)
+      .setMaxLength(maxLength)
+      .setPlaceholder(placeholder),
+  );
+}
+
+/**
+ * Builds the role request button row.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Role request button row.
+ * @skill-verified
+ */
+export function buildRoleRequestButtonRow() {
+  return createButtonRow(FORM_IDS.roleButton, 'Создать заявку', ButtonStyle.Secondary);
+}
+
+/**
+ * Builds the sales lot button row.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Sales lot button row.
+ * @skill-verified
+ */
+export function buildSalesLotButtonRow() {
+  return createButtonRow(FORM_IDS.salesButton, 'Создать лот', ButtonStyle.Success);
+}
+
+/**
+ * Builds the role request modal.
+ * @returns {ModalBuilder} Role request modal.
+ * @skill-verified
+ */
+export function buildRoleRequestModal() {
+  return new ModalBuilder()
+    .setCustomId(FORM_IDS.roleModal)
+    .setTitle('Подача на получение роли')
+    .addComponents(
+      createTextInputRow(FORM_IDS.roleNickname, 'Игровой ник', TextInputStyle.Short, true, 100, 'Например: Killa_Famq'),
+      createTextInputRow(FORM_IDS.roleStatic, 'Статик / ID', TextInputStyle.Short, true, 100, 'Например: 12345'),
+      createTextInputRow(FORM_IDS.roleScreenshot, 'Скрин F2 - Персонаж', TextInputStyle.Paragraph, true, 500, 'Вставь ссылку на скриншот'),
+    );
+}
+
+/**
+ * Builds the sales lot modal.
+ * @returns {ModalBuilder} Sales lot modal.
+ * @skill-verified
+ */
+export function buildSalesLotModal() {
+  return new ModalBuilder()
+    .setCustomId(FORM_IDS.salesModal)
+    .setTitle('Создать лот')
+    .addComponents(
+      createTextInputRow(FORM_IDS.salesItem, 'Товар', TextInputStyle.Short, true, 100, 'Что продаешь'),
+      createTextInputRow(FORM_IDS.salesPrice, 'Цена', TextInputStyle.Short, true, 100, 'Например: 50 000$'),
+      createTextInputRow(FORM_IDS.salesDescription, 'Описание', TextInputStyle.Paragraph, false, 700, 'Можно оставить пустым'),
+      createTextInputRow(FORM_IDS.salesScreenshot, 'Скрин', TextInputStyle.Paragraph, true, 500, 'Вставь ссылку на скриншот'),
+    );
+}

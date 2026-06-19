@@ -1,0 +1,5 @@
+node_modules/
+.env
+data/guild-state.json
+logs/
+npm-debug.log*

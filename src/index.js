@@ -1,0 +1,1060 @@
+import {
+  ActivityType,
+  ChannelType,
+  Client,
+  EmbedBuilder,
+  Events,
+  GatewayIntentBits,
+  MessageFlags,
+  PermissionFlagsBits,
+} from 'discord.js';
+import { COMMAND_GROUPS } from './commands.js';
+import { getRuntimeConfig } from './config.js';
+import { FORM_IDS, buildRoleRequestModal, buildSalesLotModal } from './form-components.js';
+import {
+  addGuildRule,
+  addWarning,
+  clearGuildRules,
+  clearWarnings,
+  getGuildRules,
+  getWarnings,
+  setGuildRules,
+} from './store.js';
+
+const BRAND = {
+  name: 'KILLA FAMQ',
+  color: 0xd7263d,
+  ok: 0x2fbf71,
+  warn: 0xf2c14e,
+  danger: 0xd7263d,
+  quiet: 0x22223b,
+};
+
+const POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+
+/**
+ * Creates a branded embed used by the bot.
+ * @param {string} title - Embed title.
+ * @param {string} description - Embed description.
+ * @param {number} [color=BRAND.color] - Embed color.
+ * @returns {EmbedBuilder} A configured embed.
+ * @skill-verified
+ */
+function createEmbed(title, description, color = BRAND.color) {
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(title)
+    .setDescription(description)
+    .setTimestamp()
+    .setFooter({ text: BRAND.name });
+}
+
+/**
+ * Sends an ephemeral response to an interaction.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @param {string | { embeds: EmbedBuilder[] }} payload - Response text or embed payload.
+ * @returns {Promise<void>} Resolves after the response is sent.
+ * @skill-verified
+ */
+async function replyPrivate(interaction, payload) {
+  const response = typeof payload === 'string' ? { content: payload } : payload;
+  const options = { ...response, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
+
+  if (interaction.deferred || interaction.replied) {
+    await interaction.followUp(options);
+    return;
+  }
+
+  await interaction.reply(options);
+}
+
+/**
+ * Sends a public response to an interaction.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @param {string | { embeds: EmbedBuilder[] }} payload - Response text or embed payload.
+ * @returns {Promise<void>} Resolves after the response is sent.
+ * @skill-verified
+ */
+async function replyPublic(interaction, payload) {
+  const response = typeof payload === 'string' ? { content: payload } : payload;
+  await interaction.reply({ ...response, allowedMentions: { parse: [] } });
+}
+
+/**
+ * Ensures the command is used inside a Discord server.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<boolean>} True when the interaction is in a guild.
+ * @skill-verified
+ */
+async function ensureGuildInteraction(interaction) {
+  if (interaction.inGuild()) {
+    return true;
+  }
+
+  await replyPrivate(interaction, 'Эта команда работает только на сервере.');
+  return false;
+}
+
+/**
+ * Checks whether the bot has a required guild permission.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @param {bigint} permission - Required Discord permission.
+ * @param {string} label - Human readable permission name.
+ * @returns {Promise<boolean>} True when the bot has the permission.
+ * @skill-verified
+ */
+async function ensureBotPermission(interaction, permission, label) {
+  const me = interaction.guild.members.me || (await interaction.guild.members.fetchMe());
+
+  if (me.permissions.has(permission)) {
+    return true;
+  }
+
+  await replyPrivate(interaction, `Мне не хватает права: ${label}. Выдай его роли бота и повтори команду.`);
+  return false;
+}
+
+/**
+ * Returns a required guild member option or replies with an error.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @param {string} optionName - User option name.
+ * @returns {Promise<import('discord.js').GuildMember | null>} Guild member or null when unavailable.
+ * @skill-verified
+ */
+async function getRequiredMember(interaction, optionName) {
+  const member = interaction.options.getMember(optionName);
+
+  if (member) {
+    return member;
+  }
+
+  await replyPrivate(interaction, 'Не нашел этого пользователя на сервере.');
+  return null;
+}
+
+/**
+ * Builds a safe audit-log reason.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @param {string | null} reason - User supplied reason.
+ * @returns {string} Truncated audit-log reason.
+ * @skill-verified
+ */
+function buildAuditReason(interaction, reason) {
+  const baseReason = reason?.trim() || 'Без причины';
+  const fullReason = `${baseReason} | Модератор: ${interaction.user.tag} (${interaction.user.id})`;
+  return fullReason.length > 512 ? fullReason.slice(0, 509) + '...' : fullReason;
+}
+
+/**
+ * Splits a multiline rules text into clean rule items.
+ * @param {string} text - Rules text.
+ * @returns {string[]} Clean rule list.
+ * @skill-verified
+ */
+function parseRules(text) {
+  const lines = text.split(/\r?\n/);
+  const rules = [];
+
+  for (const line of lines) {
+    const cleanLine = line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').trim();
+
+    if (cleanLine) {
+      rules.push(cleanLine);
+    }
+  }
+
+  return rules;
+}
+
+/**
+ * Formats saved rules as a numbered Discord message.
+ * @param {string[]} rules - Rule list.
+ * @returns {string} Formatted rules text.
+ * @skill-verified
+ */
+function formatRules(rules) {
+  if (rules.length === 0) {
+    return 'Правила еще не настроены. Админ может добавить их через `/правила-настроить`.';
+  }
+
+  const lines = [];
+
+  for (let index = 0; index < rules.length; index += 1) {
+    lines.push(`**${index + 1}.** ${rules[index]}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Parses poll options from semicolon-separated user input.
+ * @param {string} text - Raw options text.
+ * @returns {string[]} Poll options.
+ * @skill-verified
+ */
+function parsePollOptions(text) {
+  const parts = text.split(';');
+  const options = [];
+
+  for (const part of parts) {
+    const option = part.trim();
+
+    if (option) {
+      options.push(option);
+    }
+  }
+
+  return options;
+}
+
+/**
+ * Formats poll options with reaction emojis.
+ * @param {string[]} options - Poll options.
+ * @returns {string} Formatted poll option list.
+ * @skill-verified
+ */
+function formatPollOptions(options) {
+  const lines = [];
+
+  for (let index = 0; index < options.length; index += 1) {
+    lines.push(`${POLL_EMOJIS[index]} ${options[index]}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Formats saved warnings for display.
+ * @param {Array<Record<string, string>>} warnings - Warning records.
+ * @returns {string} Formatted warning list.
+ * @skill-verified
+ */
+function formatWarnings(warnings) {
+  if (warnings.length === 0) {
+    return 'Предупреждений нет.';
+  }
+
+  const lines = [];
+
+  for (let index = 0; index < warnings.length; index += 1) {
+    const warning = warnings[index];
+    lines.push(`**${index + 1}.** ${warning.reason}\nМодератор: <@${warning.moderatorId}> • ${warning.createdAt}`);
+  }
+
+  return lines.join('\n\n');
+}
+
+/**
+ * Returns a text channel from an optional channel option or the current interaction channel.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @param {string} optionName - Channel option name.
+ * @returns {import('discord.js').GuildTextBasedChannel | null} Target text channel.
+ * @skill-verified
+ */
+function getTargetTextChannel(interaction, optionName) {
+  const selectedChannel = interaction.options.getChannel(optionName);
+  const channel = selectedChannel || interaction.channel;
+
+  if (!channel || !channel.isTextBased() || channel.type === ChannelType.DM) {
+    return null;
+  }
+
+  return channel;
+}
+
+/**
+ * Returns a trimmed modal text field value.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @param {string} fieldId - Text field custom ID.
+ * @returns {string} Trimmed field value.
+ * @skill-verified
+ */
+function getModalTextValue(interaction, fieldId) {
+  return interaction.fields.getTextInputValue(fieldId).trim();
+}
+
+/**
+ * Formats an optional field value for an embed.
+ * @param {string} value - Raw field value.
+ * @returns {string} Formatted embed field value.
+ * @skill-verified
+ */
+function formatOptionalField(value) {
+  const cleanValue = value.trim();
+  return cleanValue || 'Не указано';
+}
+
+/**
+ * Truncates text to fit safely inside an embed field.
+ * @param {string} value - Raw field value.
+ * @param {number} maxLength - Maximum allowed length.
+ * @returns {string} Truncated field value.
+ * @skill-verified
+ */
+function truncateFieldValue(value, maxLength) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+/**
+ * Returns a normalized HTTP(S) URL or null.
+ * @param {string} value - Raw URL value.
+ * @returns {string | null} Normalized URL when valid.
+ * @skill-verified
+ */
+function getHttpUrl(value) {
+  try {
+    const url = new URL(value);
+
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Checks whether a URL is likely to be renderable as an embed image.
+ * @param {string} url - Normalized URL.
+ * @returns {boolean} True when the URL looks image-like.
+ * @skill-verified
+ */
+function isLikelyImageUrl(url) {
+  const lowerUrl = url.toLowerCase();
+  return lowerUrl.startsWith('https://cdn.discordapp.com/')
+    || lowerUrl.startsWith('https://media.discordapp.net/')
+    || /\.(?:png|jpe?g|gif|webp)(?:$|[?#])/i.test(lowerUrl);
+}
+
+/**
+ * Adds screenshot information to an embed.
+ * @param {EmbedBuilder} embed - Embed to update.
+ * @param {string} screenshot - Screenshot text or URL.
+ * @returns {EmbedBuilder} Updated embed.
+ * @skill-verified
+ */
+function addScreenshotToEmbed(embed, screenshot) {
+  const screenshotUrl = getHttpUrl(screenshot);
+
+  if (!screenshotUrl) {
+    embed.addFields({ name: 'Скрин', value: truncateFieldValue(screenshot, 1024) });
+    return embed;
+  }
+
+  embed.addFields({ name: 'Скрин', value: `[Открыть скрин](${screenshotUrl})` });
+
+  if (isLikelyImageUrl(screenshotUrl)) {
+    embed.setImage(screenshotUrl);
+  }
+
+  return embed;
+}
+
+/**
+ * Builds an embed for a submitted role request.
+ * @param {import('discord.js').User} user - User who submitted the form.
+ * @param {{ nickname: string, staticId: string, screenshot: string }} data - Submitted role request data.
+ * @returns {EmbedBuilder} Role request submission embed.
+ * @skill-verified
+ */
+function buildRoleSubmissionEmbed(user, data) {
+  const embed = new EmbedBuilder()
+    .setColor(0x111111)
+    .setTitle('🎴 Заявка на получение роли')
+    .setDescription(`<@${user.id}>`)
+    .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ size: 128 }) })
+    .addFields(
+      { name: 'Игровой ник', value: truncateFieldValue(data.nickname, 1024), inline: true },
+      { name: 'Статик / ID', value: truncateFieldValue(data.staticId, 1024), inline: true },
+    )
+    .setFooter({ text: 'KILLA FAMQ • Заявка на роль' })
+    .setTimestamp();
+
+  return addScreenshotToEmbed(embed, data.screenshot);
+}
+
+/**
+ * Builds an embed for a submitted sales lot.
+ * @param {import('discord.js').User} user - User who submitted the form.
+ * @param {{ item: string, price: string, description: string, screenshot: string }} data - Submitted sales data.
+ * @returns {EmbedBuilder} Sales lot submission embed.
+ * @skill-verified
+ */
+function buildSalesSubmissionEmbed(user, data) {
+  const embed = new EmbedBuilder()
+    .setColor(BRAND.ok)
+    .setTitle('💸 Лот на продажу')
+    .setDescription(`<@${user.id}>`)
+    .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ size: 128 }) })
+    .addFields(
+      { name: 'Товар', value: truncateFieldValue(data.item, 1024), inline: true },
+      { name: 'Цена', value: truncateFieldValue(data.price, 1024), inline: true },
+      { name: 'Описание', value: truncateFieldValue(formatOptionalField(data.description), 1024) },
+    )
+    .setFooter({ text: 'KILLA FAMQ • Лот' })
+    .setTimestamp();
+
+  return addScreenshotToEmbed(embed, data.screenshot);
+}
+
+/**
+ * Sends a submitted form embed to the current channel.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @param {EmbedBuilder} embed - Submission embed.
+ * @returns {Promise<void>} Resolves after the submission is sent.
+ * @skill-verified
+ */
+async function sendSubmissionEmbed(interaction, embed) {
+  if (!interaction.channel || !interaction.channel.isTextBased() || !('send' in interaction.channel)) {
+    await interaction.reply({ content: 'Не нашел канал, куда отправить результат формы.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.channel.send({
+    content: `<@${interaction.user.id}>`,
+    embeds: [embed],
+    allowedMentions: { users: [interaction.user.id] },
+  });
+  await interaction.editReply('Готово, отправил.');
+}
+
+/**
+ * Handles interactive form buttons.
+ * @param {import('discord.js').ButtonInteraction} interaction - Button interaction.
+ * @returns {Promise<boolean>} True when the button was handled.
+ * @skill-verified
+ */
+async function handleFormButton(interaction) {
+  if (interaction.customId === FORM_IDS.roleButton) {
+    await interaction.showModal(buildRoleRequestModal());
+    return true;
+  }
+
+  if (interaction.customId === FORM_IDS.salesButton) {
+    await interaction.showModal(buildSalesLotModal());
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Handles role request modal submissions.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @returns {Promise<void>} Resolves after the role request is handled.
+ * @skill-verified
+ */
+async function handleRoleRequestModal(interaction) {
+  const embed = buildRoleSubmissionEmbed(interaction.user, {
+    nickname: getModalTextValue(interaction, FORM_IDS.roleNickname),
+    staticId: getModalTextValue(interaction, FORM_IDS.roleStatic),
+    screenshot: getModalTextValue(interaction, FORM_IDS.roleScreenshot),
+  });
+
+  await sendSubmissionEmbed(interaction, embed);
+}
+
+/**
+ * Handles sales lot modal submissions.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @returns {Promise<void>} Resolves after the sales lot is handled.
+ * @skill-verified
+ */
+async function handleSalesLotModal(interaction) {
+  const embed = buildSalesSubmissionEmbed(interaction.user, {
+    item: getModalTextValue(interaction, FORM_IDS.salesItem),
+    price: getModalTextValue(interaction, FORM_IDS.salesPrice),
+    description: getModalTextValue(interaction, FORM_IDS.salesDescription),
+    screenshot: getModalTextValue(interaction, FORM_IDS.salesScreenshot),
+  });
+
+  await sendSubmissionEmbed(interaction, embed);
+}
+
+/**
+ * Handles interactive modal submissions.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @returns {Promise<boolean>} True when the modal was handled.
+ * @skill-verified
+ */
+async function handleFormModal(interaction) {
+  if (interaction.customId === FORM_IDS.roleModal) {
+    await handleRoleRequestModal(interaction);
+    return true;
+  }
+
+  if (interaction.customId === FORM_IDS.salesModal) {
+    await handleSalesLotModal(interaction);
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Handles the /помощь command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleHelp(interaction) {
+  const embed = createEmbed('KILLA FAMQ: команды', 'Пиши `/` и выбирай русские команды из списка Discord.', BRAND.quiet);
+
+  for (const group of COMMAND_GROUPS) {
+    const lines = [];
+
+    for (const command of group.commands) {
+      lines.push(`**/${command[0]}** - ${command[1]}`);
+    }
+
+    embed.addFields({ name: group.name, value: lines.join('\n') });
+  }
+
+  await replyPrivate(interaction, { embeds: [embed] });
+}
+
+/**
+ * Handles the /правила command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleRules(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const rules = await getGuildRules(interaction.guildId);
+  const embed = createEmbed('Правила сервера', formatRules(rules), BRAND.quiet);
+  await replyPublic(interaction, { embeds: [embed] });
+}
+
+/**
+ * Handles the /сервер command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleServer(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const guild = interaction.guild;
+  const createdAt = `<t:${Math.floor(guild.createdTimestamp / 1000)}:D>`;
+  const embed = createEmbed('Сервер', `**${guild.name}**`, BRAND.quiet)
+    .setThumbnail(guild.iconURL({ size: 256 }))
+    .addFields(
+      { name: 'Участники', value: String(guild.memberCount), inline: true },
+      { name: 'Каналы', value: String(guild.channels.cache.size), inline: true },
+      { name: 'Создан', value: createdAt, inline: true },
+    );
+
+  await replyPrivate(interaction, { embeds: [embed] });
+}
+
+/**
+ * Handles the /правила-настроить command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleRulesSetup(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const subcommand = interaction.options.getSubcommand();
+
+  if (subcommand === 'установить') {
+    const text = interaction.options.getString('текст', true);
+    const rules = parseRules(text);
+
+    if (rules.length === 0) {
+      await replyPrivate(interaction, 'Не вижу ни одного правила в тексте.');
+      return;
+    }
+
+    await setGuildRules(interaction.guildId, rules);
+    await replyPrivate(interaction, `Готово: сохранено правил - ${rules.length}.`);
+    return;
+  }
+
+  if (subcommand === 'добавить') {
+    const rule = interaction.options.getString('правило', true).trim();
+    const rules = await addGuildRule(interaction.guildId, rule);
+    await replyPrivate(interaction, `Правило добавлено. Всего правил: ${rules.length}.`);
+    return;
+  }
+
+  if (subcommand === 'очистить') {
+    await clearGuildRules(interaction.guildId);
+    await replyPrivate(interaction, 'Правила очищены.');
+  }
+}
+
+/**
+ * Handles the /очистить command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleClear(interaction) {
+  if (!(await ensureGuildInteraction(interaction)) || !(await ensureBotPermission(interaction, PermissionFlagsBits.ManageMessages, 'Управлять сообщениями'))) {
+    return;
+  }
+
+  const amount = interaction.options.getInteger('количество', true);
+
+  if (!interaction.channel || !interaction.channel.isTextBased() || !('bulkDelete' in interaction.channel)) {
+    await replyPrivate(interaction, 'В этом канале нельзя массово удалять сообщения.');
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const deleted = await interaction.channel.bulkDelete(amount, true);
+  await interaction.editReply(`Удалено сообщений: ${deleted.size}. Старые сообщения старше 14 дней Discord не дает удалять пачкой.`);
+}
+
+/**
+ * Handles the /мут command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleMute(interaction) {
+  if (!(await ensureGuildInteraction(interaction)) || !(await ensureBotPermission(interaction, PermissionFlagsBits.ModerateMembers, 'Модерировать участников'))) {
+    return;
+  }
+
+  const member = await getRequiredMember(interaction, 'пользователь');
+
+  if (!member) {
+    return;
+  }
+
+  if (!member.moderatable) {
+    await replyPrivate(interaction, 'Я не могу выдать тайм-аут этому пользователю: роль выше моей или это владелец сервера.');
+    return;
+  }
+
+  const minutes = interaction.options.getInteger('минуты', true);
+  const reason = interaction.options.getString('причина');
+  await member.timeout(minutes * 60 * 1000, buildAuditReason(interaction, reason));
+  await replyPublic(interaction, { embeds: [createEmbed('Тайм-аут выдан', `<@${member.id}> получил тайм-аут на ${minutes} мин.`, BRAND.warn)] });
+}
+
+/**
+ * Handles the /размут command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleUnmute(interaction) {
+  if (!(await ensureGuildInteraction(interaction)) || !(await ensureBotPermission(interaction, PermissionFlagsBits.ModerateMembers, 'Модерировать участников'))) {
+    return;
+  }
+
+  const member = await getRequiredMember(interaction, 'пользователь');
+
+  if (!member) {
+    return;
+  }
+
+  if (!member.moderatable) {
+    await replyPrivate(interaction, 'Я не могу менять тайм-аут этого пользователя: роль выше моей или это владелец сервера.');
+    return;
+  }
+
+  const reason = interaction.options.getString('причина');
+  await member.timeout(null, buildAuditReason(interaction, reason));
+  await replyPublic(interaction, { embeds: [createEmbed('Тайм-аут снят', `<@${member.id}> снова может писать.`, BRAND.ok)] });
+}
+
+/**
+ * Handles the /кик command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleKick(interaction) {
+  if (!(await ensureGuildInteraction(interaction)) || !(await ensureBotPermission(interaction, PermissionFlagsBits.KickMembers, 'Кикать участников'))) {
+    return;
+  }
+
+  const member = await getRequiredMember(interaction, 'пользователь');
+
+  if (!member) {
+    return;
+  }
+
+  if (!member.kickable) {
+    await replyPrivate(interaction, 'Я не могу кикнуть этого пользователя: роль выше моей или это владелец сервера.');
+    return;
+  }
+
+  const reason = interaction.options.getString('причина');
+  await member.kick(buildAuditReason(interaction, reason));
+  await replyPublic(interaction, { embeds: [createEmbed('Пользователь кикнут', `<@${member.id}> был кикнут с сервера.`, BRAND.warn)] });
+}
+
+/**
+ * Handles the /бан command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleBan(interaction) {
+  if (!(await ensureGuildInteraction(interaction)) || !(await ensureBotPermission(interaction, PermissionFlagsBits.BanMembers, 'Банить участников'))) {
+    return;
+  }
+
+  const user = interaction.options.getUser('пользователь', true);
+  const member = interaction.options.getMember('пользователь');
+
+  if (member && !member.bannable) {
+    await replyPrivate(interaction, 'Я не могу забанить этого пользователя: роль выше моей или это владелец сервера.');
+    return;
+  }
+
+  const reason = interaction.options.getString('причина');
+  const days = interaction.options.getInteger('удалить-дни') || 0;
+  await interaction.guild.members.ban(user.id, {
+    deleteMessageSeconds: days * 24 * 60 * 60,
+    reason: buildAuditReason(interaction, reason),
+  });
+  await replyPublic(interaction, { embeds: [createEmbed('Пользователь забанен', `<@${user.id}> получил бан.`, BRAND.danger)] });
+}
+
+/**
+ * Handles the /разбан command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleUnban(interaction) {
+  if (!(await ensureGuildInteraction(interaction)) || !(await ensureBotPermission(interaction, PermissionFlagsBits.BanMembers, 'Банить участников'))) {
+    return;
+  }
+
+  const userId = interaction.options.getString('id', true).trim();
+  const reason = interaction.options.getString('причина');
+  await interaction.guild.members.unban(userId, buildAuditReason(interaction, reason));
+  await replyPublic(interaction, { embeds: [createEmbed('Бан снят', `Пользователь с ID ${userId} разбанен.`, BRAND.ok)] });
+}
+
+/**
+ * Handles the /предупредить command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleWarn(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const member = await getRequiredMember(interaction, 'пользователь');
+
+  if (!member) {
+    return;
+  }
+
+  const reason = interaction.options.getString('причина', true).trim();
+  const warnings = await addWarning(interaction.guildId, member.id, {
+    reason,
+    moderatorId: interaction.user.id,
+    createdAt: new Date().toISOString(),
+  });
+  const embed = createEmbed('Предупреждение выдано', `<@${member.id}> получил предупреждение.\nВсего предупреждений: ${warnings.length}.`, BRAND.warn);
+  await replyPublic(interaction, { embeds: [embed] });
+}
+
+/**
+ * Handles the /предупреждения command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleWarnings(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const member = await getRequiredMember(interaction, 'пользователь');
+
+  if (!member) {
+    return;
+  }
+
+  const warnings = await getWarnings(interaction.guildId, member.id);
+  const embed = createEmbed(`Предупреждения: ${member.user.tag}`, formatWarnings(warnings), BRAND.quiet);
+  await replyPrivate(interaction, { embeds: [embed] });
+}
+
+/**
+ * Handles the /снять-предупреждения command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleClearWarnings(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const member = await getRequiredMember(interaction, 'пользователь');
+
+  if (!member) {
+    return;
+  }
+
+  const removed = await clearWarnings(interaction.guildId, member.id);
+  await replyPrivate(interaction, `Очищено предупреждений для ${member.user.tag}: ${removed}.`);
+}
+
+/**
+ * Handles the /замедлить command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleSlowmode(interaction) {
+  if (!(await ensureGuildInteraction(interaction)) || !(await ensureBotPermission(interaction, PermissionFlagsBits.ManageChannels, 'Управлять каналами'))) {
+    return;
+  }
+
+  if (!interaction.channel || !interaction.channel.isTextBased() || !('setRateLimitPerUser' in interaction.channel)) {
+    await replyPrivate(interaction, 'В этом канале нельзя настроить slowmode.');
+    return;
+  }
+
+  const seconds = interaction.options.getInteger('секунды', true);
+  await interaction.channel.setRateLimitPerUser(seconds, buildAuditReason(interaction, `Slowmode: ${seconds} сек.`));
+  await replyPublic(interaction, { embeds: [createEmbed('Slowmode обновлен', `Теперь задержка в канале: ${seconds} сек.`, BRAND.ok)] });
+}
+
+/**
+ * Handles the /объявление command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleAnnouncement(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const channel = getTargetTextChannel(interaction, 'канал');
+
+  if (!channel || !('send' in channel)) {
+    await replyPrivate(interaction, 'Не нашел текстовый канал для объявления.');
+    return;
+  }
+
+  const text = interaction.options.getString('текст', true).trim();
+  const embed = createEmbed('Объявление', text, BRAND.color);
+  await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+  await replyPrivate(interaction, `Объявление отправлено в ${channel}.`);
+}
+
+/**
+ * Handles the /сказать command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handleSay(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const channel = getTargetTextChannel(interaction, 'канал');
+
+  if (!channel || !('send' in channel)) {
+    await replyPrivate(interaction, 'Не нашел текстовый канал для сообщения.');
+    return;
+  }
+
+  const text = interaction.options.getString('текст', true).trim();
+
+  if (!text) {
+    await replyPrivate(interaction, 'Сообщение не должно быть пустым.');
+    return;
+  }
+
+  await channel.send({ content: text, allowedMentions: { parse: [] } });
+  await replyPrivate(interaction, `Сообщение отправлено в ${channel}.`);
+}
+
+/**
+ * Handles the /опрос command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after handling the command.
+ * @skill-verified
+ */
+async function handlePoll(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const channel = getTargetTextChannel(interaction, 'канал');
+
+  if (!channel || !('send' in channel)) {
+    await replyPrivate(interaction, 'Не нашел текстовый канал для опроса.');
+    return;
+  }
+
+  const question = interaction.options.getString('вопрос', true).trim();
+  const options = parsePollOptions(interaction.options.getString('варианты', true));
+
+  if (options.length < 2 || options.length > 10) {
+    await replyPrivate(interaction, 'Для опроса нужно от 2 до 10 вариантов через `;`.');
+    return;
+  }
+
+  const embed = createEmbed(question, formatPollOptions(options), BRAND.quiet).setAuthor({ name: `Опрос от ${interaction.user.tag}` });
+  const message = await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+
+  for (let index = 0; index < options.length; index += 1) {
+    await message.react(POLL_EMOJIS[index]);
+  }
+
+  await replyPrivate(interaction, `Опрос отправлен в ${channel}.`);
+}
+
+/**
+ * Dispatches a slash command to its handler.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the command is handled.
+ * @skill-verified
+ */
+async function dispatchCommand(interaction) {
+  switch (interaction.commandName) {
+    case 'помощь':
+      await handleHelp(interaction);
+      break;
+    case 'правила':
+      await handleRules(interaction);
+      break;
+    case 'сервер':
+      await handleServer(interaction);
+      break;
+    case 'правила-настроить':
+      await handleRulesSetup(interaction);
+      break;
+    case 'очистить':
+      await handleClear(interaction);
+      break;
+    case 'мут':
+      await handleMute(interaction);
+      break;
+    case 'размут':
+      await handleUnmute(interaction);
+      break;
+    case 'кик':
+      await handleKick(interaction);
+      break;
+    case 'бан':
+      await handleBan(interaction);
+      break;
+    case 'разбан':
+      await handleUnban(interaction);
+      break;
+    case 'предупредить':
+      await handleWarn(interaction);
+      break;
+    case 'предупреждения':
+      await handleWarnings(interaction);
+      break;
+    case 'снять-предупреждения':
+      await handleClearWarnings(interaction);
+      break;
+    case 'замедлить':
+      await handleSlowmode(interaction);
+      break;
+    case 'сказать':
+      await handleSay(interaction);
+      break;
+    case 'объявление':
+      await handleAnnouncement(interaction);
+      break;
+    case 'опрос':
+      await handlePoll(interaction);
+      break;
+    default:
+      await replyPrivate(interaction, 'Я пока не знаю такую команду.');
+  }
+}
+
+/**
+ * Handles new Discord interactions.
+ * @param {import('discord.js').Interaction} interaction - Discord interaction.
+ * @returns {Promise<void>} Resolves after the interaction is handled.
+ * @skill-verified
+ */
+async function handleInteraction(interaction) {
+  try {
+    if (interaction.isChatInputCommand()) {
+      await dispatchCommand(interaction);
+      return;
+    }
+
+    if (interaction.isButton()) {
+      await handleFormButton(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit()) {
+      await handleFormModal(interaction);
+    }
+  } catch (error) {
+    console.error(error);
+
+    if (interaction.deferred || interaction.replied) {
+      await interaction.followUp({ content: 'Команда сорвалась с ошибкой. Подробности уже в консоли.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({ content: 'Команда сорвалась с ошибкой. Подробности уже в консоли.', flags: MessageFlags.Ephemeral });
+  }
+}
+
+/**
+ * Handles the Discord ready event.
+ * @param {import('discord.js').Client<true>} client - Ready Discord client.
+ * @returns {Promise<void>} Resolves after presence is set.
+ * @skill-verified
+ */
+async function handleReady(client) {
+  await client.user.setPresence({
+    status: 'online',
+    activities: [{ name: 'русские команды | /помощь', type: ActivityType.Watching }],
+  });
+
+  console.log(`KILLA FAMQ запущен как ${client.user.tag}.`);
+}
+
+/**
+ * Starts the Discord bot.
+ * @returns {Promise<void>} Resolves after login is initiated.
+ * @skill-verified
+ */
+async function startBot() {
+  const config = getRuntimeConfig();
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+  client.once(Events.ClientReady, handleReady);
+  client.on(Events.InteractionCreate, handleInteraction);
+
+  await client.login(config.token);
+}
+
+await startBot();
