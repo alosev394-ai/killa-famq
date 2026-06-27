@@ -1,7 +1,6 @@
 import { ChannelType, Client, EmbedBuilder, Events, GatewayIntentBits } from 'discord.js';
 import { getRuntimeConfig } from './config.js';
 
-const CORPORATION_NAME = 'KILLA FAMQ corp';
 const DIVIDER = '━━━━━━━━━━━━━━━━━━';
 const PRICE_MESSAGE_ID = '1520338343726940202';
 
@@ -115,10 +114,7 @@ function appendPriceGroup(lines, group) {
  * @skill-verified
  */
 function buildResourcePricesDescription() {
-  const lines = [
-    '💵 ОПЛАТА ЗА РЕСУРСЫ 💵',
-    '',
-  ];
+  const lines = [];
 
   for (const group of PRICE_GROUPS) {
     appendPriceGroup(lines, group);
@@ -136,7 +132,7 @@ function buildResourcePricesDescription() {
 function buildResourcePricesEmbed() {
   return new EmbedBuilder()
     .setColor(0x2fbf71)
-    .setTitle(`💵 Расценки «${CORPORATION_NAME}»`)
+    .setTitle('💵 ОПЛАТА ЗА РЕСУРСЫ 💵')
     .setDescription(buildResourcePricesDescription())
     .setFooter({ text: 'KILLA FAMQ • Актуальные расценки' })
     .setTimestamp();
