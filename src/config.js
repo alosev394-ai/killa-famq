@@ -56,7 +56,7 @@ export function getRuntimeConfig() {
     clientId: requireEnv('DISCORD_CLIENT_ID'),
     guildId: optionalEnv('DISCORD_GUILD_ID'),
     logChannelId: optionalEnv('DISCORD_LOG_CHANNEL_ID'),
-    enableMemberLogs: optionalBooleanEnv('DISCORD_ENABLE_MEMBER_LOGS', false),
-    enableMessageContentLogs: optionalBooleanEnv('DISCORD_ENABLE_MESSAGE_CONTENT_LOGS', false),
+    enableMemberLogs: optionalBooleanEnv('DISCORD_ENABLE_MEMBER_LOGS', true),
+    enableMessageContentLogs: optionalBooleanEnv('DISCORD_ENABLE_MESSAGE_CONTENT_LOGS', true),
   };
 }

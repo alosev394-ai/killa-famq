@@ -26,11 +26,11 @@
    DISCORD_CLIENT_ID=id_приложения
    DISCORD_GUILD_ID=id_тестового_сервера
    DISCORD_LOG_CHANNEL_ID=
-   DISCORD_ENABLE_MEMBER_LOGS=false
-   DISCORD_ENABLE_MESSAGE_CONTENT_LOGS=false
+   DISCORD_ENABLE_MEMBER_LOGS=true
+   DISCORD_ENABLE_MESSAGE_CONTENT_LOGS=true
    ```
 
-   `DISCORD_LOG_CHANNEL_ID` можно оставить пустым: бот сам найдёт канал, если в названии есть `логи`. Флаги `DISCORD_ENABLE_MEMBER_LOGS` и `DISCORD_ENABLE_MESSAGE_CONTENT_LOGS` включай только после включения таких же privileged intents в Discord Developer Portal.
+   `DISCORD_LOG_CHANNEL_ID` можно оставить пустым: бот сам найдёт канал, если в названии есть `логи`. Флаги `DISCORD_ENABLE_MEMBER_LOGS` и `DISCORD_ENABLE_MESSAGE_CONTENT_LOGS` включены для полного журнала; ставь `false` только если такие privileged intents выключены в Discord Developer Portal.
 
 3. Чтобы поставить имя `KILLA FAMQ` и прикрепленную аватарку, выполни:
 
