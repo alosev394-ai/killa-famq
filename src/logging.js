@@ -1,4 +1,4 @@
-import { ChannelType, EmbedBuilder, Events, GatewayIntentBits, PermissionFlagsBits, Partials } from 'discord.js';
+import { AuditLogEvent, ChannelType, EmbedBuilder, Events, GatewayIntentBits, PermissionFlagsBits, Partials } from 'discord.js';
 
 const LOG_COLORS = {
   info: 0x3498db,
@@ -12,6 +12,7 @@ const LOG_CHANNEL_KEYWORDS = ['лог', 'logs', 'журнал'];
 const MISSING_LOG_CHANNEL_GUILDS = new Set();
 const MAX_FIELD_LENGTH = 1024;
 const MAX_DESCRIPTION_LENGTH = 3900;
+const VOICE_AUDIT_LOG_WINDOW_MS = 7000;
 let activeConfig = {};
 
 /**
@@ -120,7 +121,6 @@ async function handleMessageDelete(message) {
     .addFields(
       buildField('Автор', message.author ? formatUser(message.author) : 'Неизвестно', true),
       buildField('Канал', formatChannelReference(message.channel), true),
-      buildField('ID сообщения', message.id, true),
     );
 
   const attachmentText = formatAttachments(message.attachments);
@@ -210,7 +210,7 @@ async function handleGuildMemberAdd(member) {
  * @skill-verified
  */
 async function handleGuildMemberRemove(member) {
-  const userText = member.user ? formatUser(member.user) : `ID: ${member.id}`;
+  const userText = member.user ? formatUser(member.user) : 'Неизвестный участник';
   const embed = buildLogEmbed('🚪 Участник вышел', userText, LOG_COLORS.warn)
     .addFields(buildField('Участников на сервере', String(member.guild.memberCount), true));
 
@@ -306,10 +306,7 @@ async function handleChannelDelete(channel) {
   }
 
   const embed = buildLogEmbed('➖ Канал удалён', `#${channel.name}`, LOG_COLORS.danger)
-    .addFields(
-      buildField('ID', channel.id, true),
-      buildField('Тип', formatChannelType(channel.type), true),
-    );
+    .addFields(buildField('Тип', formatChannelType(channel.type), true));
 
   await sendGuildLog(channel.guild, embed);
 }
@@ -360,7 +357,8 @@ async function handleVoiceStateUpdate(oldState, newState) {
 
   const oldChannel = oldState.channel ? formatChannelReference(oldState.channel) : 'Не был в войсе';
   const newChannel = newState.channel ? formatChannelReference(newState.channel) : 'Вышел из войса';
-  const title = getVoiceLogTitle(oldState.channelId, newState.channelId);
+  const moveAuditEntry = await findRecentVoiceMoveAuditEntry(newState);
+  const title = getVoiceLogTitle(oldState.channelId, newState.channelId, moveAuditEntry);
   const color = newState.channelId ? LOG_COLORS.info : LOG_COLORS.warn;
   const embed = buildLogEmbed(title, formatUser(member.user), color)
     .addFields(
@@ -368,7 +366,63 @@ async function handleVoiceStateUpdate(oldState, newState) {
       buildField('Стало', newChannel, true),
     );
 
+  if (moveAuditEntry?.executor) {
+    embed.addFields(buildField('Перенёс', formatUser(moveAuditEntry.executor), true));
+  }
+
   await sendGuildLog(newState.guild, embed);
+}
+
+/**
+ * Finds a recent audit-log entry for a moderator voice move.
+ * @param {import('discord.js').VoiceState} state - New voice state.
+ * @returns {Promise<import('discord.js').GuildAuditLogsEntry | null>} Recent move audit entry or null.
+ * @skill-verified
+ */
+async function findRecentVoiceMoveAuditEntry(state) {
+  const me = state.guild.members.me || await state.guild.members.fetchMe();
+
+  if (!me.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
+    return null;
+  }
+
+  try {
+    const auditLogs = await state.guild.fetchAuditLogs({ type: AuditLogEvent.MemberMove, limit: 5 });
+    const now = Date.now();
+
+    for (const [, entry] of auditLogs.entries) {
+      if (now - entry.createdTimestamp > VOICE_AUDIT_LOG_WINDOW_MS) {
+        continue;
+      }
+
+      if (isVoiceMoveEntryForState(entry, state)) {
+        return entry;
+      }
+    }
+  } catch (error) {
+    console.error(`Не удалось прочитать audit log voice-переноса в ${state.guild.name}:`, error);
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether an audit entry likely belongs to the current voice state change.
+ * @param {import('discord.js').GuildAuditLogsEntry} entry - Audit log entry.
+ * @param {import('discord.js').VoiceState} state - New voice state.
+ * @returns {boolean} True when the audit entry likely matches the move.
+ * @skill-verified
+ */
+function isVoiceMoveEntryForState(entry, state) {
+  const extraChannelId = entry.extra && typeof entry.extra === 'object' && 'channel' in entry.extra
+    ? entry.extra.channel?.id
+    : null;
+
+  if (extraChannelId && state.channelId && extraChannelId !== state.channelId) {
+    return false;
+  }
+
+  return Boolean(entry.executor && state.channelId);
 }
 
 /**
@@ -626,11 +680,11 @@ function buildField(name, value, inline) {
 /**
  * Formats a Discord user for logs.
  * @param {import('discord.js').User} user - User to format.
- * @returns {string} Mention, tag, and ID.
+ * @returns {string} User mention.
  * @skill-verified
  */
 function formatUser(user) {
-  return `<@${user.id}>\n${user.tag} • \`${user.id}\``;
+  return `<@${user.id}>`;
 }
 
 /**
@@ -645,10 +699,10 @@ function formatChannelReference(channel) {
   }
 
   if ('guild' in channel && 'name' in channel) {
-    return `<#${channel.id}>\n#${channel.name} • \`${channel.id}\``;
+    return `<#${channel.id}>`;
   }
 
-  return `\`${channel.id}\``;
+  return 'Канал недоступен';
 }
 
 /**
@@ -659,7 +713,7 @@ function formatChannelReference(channel) {
  */
 function formatMessageContent(content) {
   if (!content) {
-    return 'Текст недоступен. Для полного текста включи Message Content Intent в Discord Developer Portal и переменную DISCORD_ENABLE_MESSAGE_CONTENT_LOGS=true.';
+    return 'Текст недоступен.';
   }
 
   return limitText(content, MAX_DESCRIPTION_LENGTH);
@@ -703,7 +757,7 @@ function formatDeletedMessageSample(messages) {
   const lines = [];
 
   for (const [, message] of messages) {
-    const author = message.author ? message.author.tag : 'Неизвестно';
+    const author = message.author ? formatUser(message.author) : 'Неизвестно';
     const text = message.content || 'текст недоступен';
     lines.push(`• ${author}: ${limitText(text, 120)}`);
 
@@ -809,10 +863,15 @@ function formatChannelType(type) {
  * Chooses a voice log title from channel movement.
  * @param {string | null} oldChannelId - Previous voice channel ID.
  * @param {string | null} newChannelId - New voice channel ID.
+ * @param {import('discord.js').GuildAuditLogsEntry | null} moveAuditEntry - Recent voice move audit entry.
  * @returns {string} Voice log title.
  * @skill-verified
  */
-function getVoiceLogTitle(oldChannelId, newChannelId) {
+function getVoiceLogTitle(oldChannelId, newChannelId, moveAuditEntry = null) {
+  if (moveAuditEntry) {
+    return '🔁 Участника перенесли в другой войс';
+  }
+
   if (!oldChannelId && newChannelId) {
     return '🔊 Участник вошёл в войс';
   }
