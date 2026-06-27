@@ -19,6 +19,10 @@ export const FORM_IDS = Object.freeze({
   salesPrice: 'sales_price',
   salesDescription: 'sales_description',
   salesScreenshot: 'sales_screenshot',
+  inviteButton: 'killa_invite_request_open',
+  inviteModal: 'killa_invite_request_submit',
+  inviteRequester: 'invite_requester',
+  inviteGuest: 'invite_guest',
 });
 
 /**
@@ -80,6 +84,15 @@ export function buildSalesLotButtonRow() {
 }
 
 /**
+ * Builds the invite request button row.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Invite request button row.
+ * @skill-verified
+ */
+export function buildInviteRequestButtonRow() {
+  return createButtonRow(FORM_IDS.inviteButton, 'Создать заявку', ButtonStyle.Success);
+}
+
+/**
  * Builds the role request modal.
  * @returns {ModalBuilder} Role request modal.
  * @skill-verified
@@ -109,5 +122,20 @@ export function buildSalesLotModal() {
       createTextInputRow(FORM_IDS.salesPrice, 'Цена', TextInputStyle.Short, true, 100, 'Например: 50 000$'),
       createTextInputRow(FORM_IDS.salesDescription, 'Описание', TextInputStyle.Paragraph, false, 700, 'Можно оставить пустым'),
       createTextInputRow(FORM_IDS.salesScreenshot, 'Скрин', TextInputStyle.Paragraph, true, 500, 'Вставь ссылку на скриншот'),
+    );
+}
+
+/**
+ * Builds the invite request modal.
+ * @returns {ModalBuilder} Invite request modal.
+ * @skill-verified
+ */
+export function buildInviteRequestModal() {
+  return new ModalBuilder()
+    .setCustomId(FORM_IDS.inviteModal)
+    .setTitle('Заявка на инвайт')
+    .addComponents(
+      createTextInputRow(FORM_IDS.inviteRequester, 'Ваш ник | CID', TextInputStyle.Short, true, 100, 'Например: Гоша Килла | 122'),
+      createTextInputRow(FORM_IDS.inviteGuest, 'Ник | CID приглашённого', TextInputStyle.Short, true, 100, 'Например: Саня | 345'),
     );
 }

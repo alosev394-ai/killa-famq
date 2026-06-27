@@ -10,7 +10,7 @@ import {
 } from 'discord.js';
 import { COMMAND_GROUPS } from './commands.js';
 import { getRuntimeConfig } from './config.js';
-import { FORM_IDS, buildRoleRequestModal, buildSalesLotModal } from './form-components.js';
+import { FORM_IDS, buildInviteRequestModal, buildRoleRequestModal, buildSalesLotModal } from './form-components.js';
 import {
   addGuildRule,
   addWarning,
@@ -404,6 +404,27 @@ function buildSalesSubmissionEmbed(user, data) {
 }
 
 /**
+ * Builds an embed for a submitted invite request.
+ * @param {import('discord.js').User} user - User who submitted the form.
+ * @param {{ requester: string, guest: string }} data - Submitted invite request data.
+ * @returns {EmbedBuilder} Invite request submission embed.
+ * @skill-verified
+ */
+function buildInviteSubmissionEmbed(user, data) {
+  return new EmbedBuilder()
+    .setColor(BRAND.ok)
+    .setTitle('🗒️ Заявка на инвайт')
+    .setDescription(`<@${user.id}>`)
+    .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ size: 128 }) })
+    .addFields(
+      { name: 'Ваш ник | CID', value: truncateFieldValue(data.requester, 1024) },
+      { name: 'Ник | CID приглашённого', value: truncateFieldValue(data.guest, 1024) },
+    )
+    .setFooter({ text: 'KILLA FAMQ • Инвайты' })
+    .setTimestamp();
+}
+
+/**
  * Sends a submitted form embed to the current channel.
  * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
  * @param {EmbedBuilder} embed - Submission embed.
@@ -439,6 +460,11 @@ async function handleFormButton(interaction) {
 
   if (interaction.customId === FORM_IDS.salesButton) {
     await interaction.showModal(buildSalesLotModal());
+    return true;
+  }
+
+  if (interaction.customId === FORM_IDS.inviteButton) {
+    await interaction.showModal(buildInviteRequestModal());
     return true;
   }
 
@@ -479,6 +505,21 @@ async function handleSalesLotModal(interaction) {
 }
 
 /**
+ * Handles invite request modal submissions.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @returns {Promise<void>} Resolves after the invite request is handled.
+ * @skill-verified
+ */
+async function handleInviteRequestModal(interaction) {
+  const embed = buildInviteSubmissionEmbed(interaction.user, {
+    requester: getModalTextValue(interaction, FORM_IDS.inviteRequester),
+    guest: getModalTextValue(interaction, FORM_IDS.inviteGuest),
+  });
+
+  await sendSubmissionEmbed(interaction, embed);
+}
+
+/**
  * Handles interactive modal submissions.
  * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
  * @returns {Promise<boolean>} True when the modal was handled.
@@ -492,6 +533,11 @@ async function handleFormModal(interaction) {
 
   if (interaction.customId === FORM_IDS.salesModal) {
     await handleSalesLotModal(interaction);
+    return true;
+  }
+
+  if (interaction.customId === FORM_IDS.inviteModal) {
+    await handleInviteRequestModal(interaction);
     return true;
   }
 
