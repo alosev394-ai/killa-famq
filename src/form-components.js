@@ -19,6 +19,8 @@ export const FORM_IDS = Object.freeze({
   salesPrice: 'sales_price',
   salesDescription: 'sales_description',
   salesScreenshot: 'sales_screenshot',
+  salesStatusActive: 'killa_sales_status_active',
+  salesStatusInactive: 'killa_sales_status_inactive',
   inviteButton: 'killa_invite_request_open',
   inviteModal: 'killa_invite_request_submit',
   inviteRequester: 'invite_requester',
@@ -81,6 +83,27 @@ export function buildRoleRequestButtonRow() {
  */
 export function buildSalesLotButtonRow() {
   return createButtonRow(FORM_IDS.salesButton, 'Создать лот', ButtonStyle.Success);
+}
+
+/**
+ * Builds the sales lot status button row.
+ * @param {'active' | 'inactive'} status - Current lot status.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Sales lot status button row.
+ * @skill-verified
+ */
+export function buildSalesLotStatusButtonRow(status = 'active') {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(FORM_IDS.salesStatusActive)
+      .setLabel('Актуально')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(status === 'active'),
+    new ButtonBuilder()
+      .setCustomId(FORM_IDS.salesStatusInactive)
+      .setLabel('Неактуально')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(status === 'inactive'),
+  );
 }
 
 /**

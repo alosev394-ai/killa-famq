@@ -15,7 +15,7 @@
     "sales-form:post": "node src/post-sales-form.js",
     "prices:post": "node src/post-resource-prices.js",
     "telegram:post": "node src/post-telegram-link.js",
-    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/form-components.js && node --check src/invite-link.js && node --check src/logging.js && node --check src/post-invite-form.js && node --check src/post-resource-prices.js && node --check src/post-role-form.js && node --check src/post-rules.js && node --check src/post-sales-form.js && node --check src/post-telegram-link.js && node --check src/update-profile.js && node --check src/commands.js && node --check src/config.js && node --check src/store.js"
+    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/form-components.js && node --check src/invite-link.js && node --check src/logging.js && node --check src/price-list.js && node --check src/post-invite-form.js && node --check src/post-resource-prices.js && node --check src/post-role-form.js && node --check src/post-rules.js && node --check src/post-sales-form.js && node --check src/post-telegram-link.js && node --check src/update-profile.js && node --check src/commands.js && node --check src/config.js && node --check src/store.js"
   },
   "engines": {
     "node": ">=22.12.0"

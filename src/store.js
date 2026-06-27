@@ -7,7 +7,7 @@ let stateQueue = Promise.resolve();
 
 /**
  * Creates an empty persisted bot state object.
- * @returns {{ guilds: Record<string, { rules: string[], warnings: Record<string, Array<Record<string, string>>> }> }} Empty state.
+ * @returns {{ guilds: Record<string, { rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }} Empty state.
  * @skill-verified
  */
 function createEmptyState() {
@@ -16,9 +16,9 @@ function createEmptyState() {
 
 /**
  * Ensures a guild has a state bucket.
- * @param {{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>> }> }} state - Full bot state.
+ * @param {{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }} state - Full bot state.
  * @param {string} guildId - Discord guild ID.
- * @returns {{ rules: string[], warnings: Record<string, Array<Record<string, string>>> }} Guild state bucket.
+ * @returns {{ rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }} Guild state bucket.
  * @skill-verified
  */
 function ensureGuildState(state, guildId) {
@@ -35,7 +35,7 @@ function ensureGuildState(state, guildId) {
 
 /**
  * Loads the full bot state from disk.
- * @returns {Promise<{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>> }> }>} Full bot state.
+ * @returns {Promise<{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }>} Full bot state.
  * @skill-verified
  */
 async function loadState() {
@@ -72,7 +72,7 @@ async function saveState(state) {
  * Runs a serialized update against one guild bucket and persists it.
  * @template T
  * @param {string} guildId - Discord guild ID.
- * @param {(guildState: { rules: string[], warnings: Record<string, Array<Record<string, string>>> }) => T} updater - State updater.
+ * @param {(guildState: { rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }) => T} updater - State updater.
  * @returns {Promise<T>} The updater result.
  * @skill-verified
  */
@@ -243,4 +243,90 @@ export function clearWarnings(guildId, userId) {
   }
 
   return updateGuildState(guildId, removeWarnings);
+}
+
+/**
+ * Returns saved price state for a guild.
+ * @param {string} guildId - Discord guild ID.
+ * @returns {Promise<{ priceList?: Record<string, unknown>, priceMessageId?: string }>} Saved price state.
+ * @skill-verified
+ */
+export async function getGuildPriceState(guildId) {
+  const state = await loadState();
+  const guildState = ensureGuildState(state, guildId);
+
+  return {
+    priceList: guildState.priceList,
+    priceMessageId: guildState.priceMessageId,
+  };
+}
+
+/**
+ * Replaces saved price list data for a guild.
+ * @param {string} guildId - Discord guild ID.
+ * @param {Record<string, unknown>} priceList - Price list data to save.
+ * @returns {Promise<Record<string, unknown>>} Saved price list.
+ * @skill-verified
+ */
+export function setGuildPriceList(guildId, priceList) {
+  /**
+   * Replaces the price list inside a guild state bucket.
+   * @param {{ rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }} guildState - Guild state bucket.
+   * @returns {Record<string, unknown>} Saved price list after replacement.
+   * @skill-verified
+   */
+  function replacePriceList(guildState) {
+    guildState.priceList = priceList;
+    return guildState.priceList;
+  }
+
+  return updateGuildState(guildId, replacePriceList);
+}
+
+/**
+ * Updates saved price list data for a guild.
+ * @template T
+ * @param {string} guildId - Discord guild ID.
+ * @param {(priceList: Record<string, unknown>) => T} updater - Price list updater.
+ * @returns {Promise<T>} The updater result.
+ * @skill-verified
+ */
+export function updateGuildPriceList(guildId, updater) {
+  /**
+   * Updates the price list inside a guild state bucket.
+   * @param {{ rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }} guildState - Guild state bucket.
+   * @returns {T} The updater result.
+   * @skill-verified
+   */
+  function updatePriceList(guildState) {
+    if (!guildState.priceList || typeof guildState.priceList !== 'object') {
+      guildState.priceList = {};
+    }
+
+    return updater(guildState.priceList);
+  }
+
+  return updateGuildState(guildId, updatePriceList);
+}
+
+/**
+ * Saves the Discord message ID used for the guild price list post.
+ * @param {string} guildId - Discord guild ID.
+ * @param {string} messageId - Price message ID.
+ * @returns {Promise<string>} Saved message ID.
+ * @skill-verified
+ */
+export function setGuildPriceMessageId(guildId, messageId) {
+  /**
+   * Stores the price message ID inside a guild state bucket.
+   * @param {{ rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }} guildState - Guild state bucket.
+   * @returns {string} Saved message ID.
+   * @skill-verified
+   */
+  function replacePriceMessageId(guildState) {
+    guildState.priceMessageId = messageId;
+    return guildState.priceMessageId;
+  }
+
+  return updateGuildState(guildId, replacePriceMessageId);
 }

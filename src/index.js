@@ -9,8 +9,16 @@ import {
 } from 'discord.js';
 import { COMMAND_GROUPS } from './commands.js';
 import { getRuntimeConfig } from './config.js';
-import { FORM_IDS, buildInviteRequestModal, buildRoleRequestModal, buildSalesLotModal } from './form-components.js';
+import { FORM_IDS, buildInviteRequestModal, buildRoleRequestModal, buildSalesLotModal, buildSalesLotStatusButtonRow } from './form-components.js';
 import { buildLogIntents, buildLogPartials, registerLogHandlers, sendStartupLogs } from './logging.js';
+import {
+  addGuildPriceItem,
+  buildPriceListEmbed,
+  getGuildPriceList,
+  publishGuildPriceList,
+  removeGuildPriceItem,
+  updateGuildPriceItem,
+} from './price-list.js';
 import {
   addGuildRule,
   addWarning,
@@ -396,6 +404,7 @@ function buildSalesSubmissionEmbed(user, data) {
       { name: 'Товар', value: truncateFieldValue(data.item, 1024), inline: true },
       { name: 'Цена', value: truncateFieldValue(data.price, 1024), inline: true },
       { name: 'Описание', value: truncateFieldValue(formatOptionalField(data.description), 1024) },
+      { name: 'Статус', value: '✅ Актуально', inline: true },
     )
     .setFooter({ text: 'KILLA FAMQ • Лот' })
     .setTimestamp();
@@ -428,10 +437,11 @@ function buildInviteSubmissionEmbed(user, data) {
  * Sends a submitted form embed to the current channel.
  * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
  * @param {EmbedBuilder} embed - Submission embed.
+ * @param {Array<import('discord.js').ActionRowBuilder>} [components=[]] - Optional message components.
  * @returns {Promise<void>} Resolves after the submission is sent.
  * @skill-verified
  */
-async function sendSubmissionEmbed(interaction, embed) {
+async function sendSubmissionEmbed(interaction, embed, components = []) {
   if (!interaction.channel || !interaction.channel.isTextBased() || !('send' in interaction.channel)) {
     await interaction.reply({ content: 'Не нашел канал, куда отправить результат формы.', flags: MessageFlags.Ephemeral });
     return;
@@ -441,9 +451,135 @@ async function sendSubmissionEmbed(interaction, embed) {
   await interaction.channel.send({
     content: `<@${interaction.user.id}>`,
     embeds: [embed],
+    components,
     allowedMentions: { users: [interaction.user.id] },
   });
   await interaction.editReply('Готово, отправил.');
+}
+
+/**
+ * Returns a sales lot status from a status button custom ID.
+ * @param {string} customId - Button custom ID.
+ * @returns {'active' | 'inactive' | null} Sales lot status or null.
+ * @skill-verified
+ */
+function getSalesStatusFromCustomId(customId) {
+  if (customId === FORM_IDS.salesStatusActive) {
+    return 'active';
+  }
+
+  if (customId === FORM_IDS.salesStatusInactive) {
+    return 'inactive';
+  }
+
+  return null;
+}
+
+/**
+ * Handles sales lot status buttons.
+ * @param {import('discord.js').ButtonInteraction} interaction - Button interaction.
+ * @returns {Promise<boolean>} True when the button was handled.
+ * @skill-verified
+ */
+async function handleSalesStatusButton(interaction) {
+  const status = getSalesStatusFromCustomId(interaction.customId);
+
+  if (!status) {
+    return false;
+  }
+
+  const ownerId = extractSalesLotOwnerId(interaction.message);
+
+  if (!canUpdateSalesLot(interaction, ownerId)) {
+    await interaction.reply({ content: 'Статус этого лота может менять только автор лота или администрация.', flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  const originalEmbed = interaction.message.embeds[0];
+
+  if (!originalEmbed) {
+    await interaction.reply({ content: 'Не нашел embed лота для обновления.', flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.message.edit({
+    embeds: [buildSalesStatusEmbed(originalEmbed, status, interaction.user)],
+    components: [buildSalesLotStatusButtonRow(status)],
+    allowedMentions: { parse: [] },
+  });
+  await interaction.editReply(`Статус лота обновлен: ${formatSalesStatus(status)}.`);
+  return true;
+}
+
+/**
+ * Extracts the sales lot owner ID from a bot lot message.
+ * @param {import('discord.js').Message} message - Sales lot message.
+ * @returns {string | null} Owner user ID or null.
+ * @skill-verified
+ */
+function extractSalesLotOwnerId(message) {
+  return extractMentionId(message.content) || extractMentionId(message.embeds[0]?.description || '');
+}
+
+/**
+ * Extracts the first Discord user mention ID from text.
+ * @param {string} value - Text to inspect.
+ * @returns {string | null} Discord user ID or null.
+ * @skill-verified
+ */
+function extractMentionId(value) {
+  const match = value.match(/<@!?(\d+)>/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Checks whether a user can change the sales lot status.
+ * @param {import('discord.js').ButtonInteraction} interaction - Button interaction.
+ * @param {string | null} ownerId - Sales lot owner ID.
+ * @returns {boolean} True when the user may update the lot status.
+ * @skill-verified
+ */
+function canUpdateSalesLot(interaction, ownerId) {
+  if (ownerId && interaction.user.id === ownerId) {
+    return true;
+  }
+
+  return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages));
+}
+
+/**
+ * Builds an updated sales lot embed with the selected status.
+ * @param {import('discord.js').Embed} originalEmbed - Existing sales lot embed.
+ * @param {'active' | 'inactive'} status - New sales lot status.
+ * @param {import('discord.js').User} actor - User who changed the status.
+ * @returns {EmbedBuilder} Updated sales lot embed.
+ * @skill-verified
+ */
+function buildSalesStatusEmbed(originalEmbed, status, actor) {
+  const embed = EmbedBuilder.from(originalEmbed)
+    .setColor(status === 'active' ? BRAND.ok : BRAND.quiet)
+    .setTitle(status === 'active' ? '💸 Лот на продажу' : '💸 Лот неактуален')
+    .setTimestamp();
+  const fields = originalEmbed.fields.filter((field) => field.name !== 'Статус' && field.name !== 'Статус обновил');
+
+  fields.push(
+    { name: 'Статус', value: formatSalesStatus(status), inline: true },
+    { name: 'Статус обновил', value: `<@${actor.id}>`, inline: true },
+  );
+  embed.setFields(fields);
+
+  return embed;
+}
+
+/**
+ * Formats a sales lot status label.
+ * @param {'active' | 'inactive'} status - Sales lot status.
+ * @returns {string} Human-readable status label.
+ * @skill-verified
+ */
+function formatSalesStatus(status) {
+  return status === 'active' ? '✅ Актуально' : '❌ Неактуально';
 }
 
 /**
@@ -453,6 +589,10 @@ async function sendSubmissionEmbed(interaction, embed) {
  * @skill-verified
  */
 async function handleFormButton(interaction) {
+  if (await handleSalesStatusButton(interaction)) {
+    return true;
+  }
+
   if (interaction.customId === FORM_IDS.roleButton) {
     await interaction.showModal(buildRoleRequestModal());
     return true;
@@ -501,7 +641,7 @@ async function handleSalesLotModal(interaction) {
     screenshot: getModalTextValue(interaction, FORM_IDS.salesScreenshot),
   });
 
-  await sendSubmissionEmbed(interaction, embed);
+  await sendSubmissionEmbed(interaction, embed, [buildSalesLotStatusButtonRow('active')]);
 }
 
 /**
@@ -977,6 +1117,166 @@ async function handlePoll(interaction) {
 }
 
 /**
+ * Returns an optional selected text channel for price publishing.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @param {string} optionName - Channel option name.
+ * @returns {import('discord.js').GuildTextBasedChannel | null} Selected text channel or null.
+ * @skill-verified
+ */
+function getOptionalSelectedTextChannel(interaction, optionName) {
+  const selectedChannel = interaction.options.getChannel(optionName);
+
+  if (!selectedChannel) {
+    return null;
+  }
+
+  if (!selectedChannel.isTextBased() || selectedChannel.type === ChannelType.DM || !('send' in selectedChannel)) {
+    throw new Error('Выбранный канал не подходит для публикации прайса.');
+  }
+
+  return selectedChannel;
+}
+
+/**
+ * Handles the /прайс command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the price list is shown.
+ * @skill-verified
+ */
+async function handlePriceList(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const priceList = await getGuildPriceList(interaction.guildId);
+  await replyPrivate(interaction, { embeds: [buildPriceListEmbed(priceList)] });
+}
+
+/**
+ * Handles the /прайс-настроить command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the price setting command is handled.
+ * @skill-verified
+ */
+async function handlePriceSetup(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const subcommand = interaction.options.getSubcommand();
+
+    if (subcommand === 'опубликовать') {
+      await handlePricePublish(interaction);
+      return;
+    }
+
+    if (subcommand === 'изменить') {
+      await handlePriceUpdate(interaction);
+      return;
+    }
+
+    if (subcommand === 'добавить') {
+      await handlePriceAdd(interaction);
+      return;
+    }
+
+    if (subcommand === 'удалить') {
+      await handlePriceRemove(interaction);
+      return;
+    }
+
+    await interaction.editReply('Не знаю такое действие для прайса.');
+  } catch (error) {
+    await interaction.editReply(error.message || 'Не получилось обновить прайс.');
+  }
+}
+
+/**
+ * Handles publishing the price list message.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the price list is published.
+ * @skill-verified
+ */
+async function handlePricePublish(interaction) {
+  const channel = getOptionalSelectedTextChannel(interaction, 'канал');
+  const result = await publishGuildPriceList(interaction.guild, { channel });
+  await interaction.editReply(`Прайс обновлен в ${result.channel}: ${result.message.url}`);
+}
+
+/**
+ * Handles updating one existing price.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the price is updated.
+ * @skill-verified
+ */
+async function handlePriceUpdate(interaction) {
+  const itemName = interaction.options.getString('название', true);
+  const price = interaction.options.getString('цена', true);
+  const emoji = interaction.options.getString('эмодзи');
+  const updateResult = await updateGuildPriceItem(interaction.guildId, itemName, {
+    price,
+    emoji,
+    updatedById: interaction.user.id,
+  });
+  const publishResult = await publishGuildPriceList(interaction.guild, { priceList: updateResult.priceList });
+
+  await interaction.editReply([
+    `Цена обновлена: **${updateResult.item.emoji} ${updateResult.item.name}**`,
+    `Было: **${updateResult.oldPrice}**`,
+    `Стало: **${updateResult.item.price}**`,
+    `Пост: ${publishResult.message.url}`,
+  ].join('\n'));
+}
+
+/**
+ * Handles adding one new price item.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the price item is added.
+ * @skill-verified
+ */
+async function handlePriceAdd(interaction) {
+  const addResult = await addGuildPriceItem(interaction.guildId, {
+    categoryId: interaction.options.getString('категория', true),
+    name: interaction.options.getString('название', true),
+    price: interaction.options.getString('цена', true),
+    emoji: interaction.options.getString('эмодзи'),
+    money: interaction.options.getBoolean('деньги') ?? true,
+    updatedById: interaction.user.id,
+  });
+  const publishResult = await publishGuildPriceList(interaction.guild, { priceList: addResult.priceList });
+
+  await interaction.editReply([
+    `Ресурс добавлен в раздел **${addResult.groupTitle}**:`,
+    `**${addResult.item.emoji} ${addResult.item.name} — ${addResult.item.price}${addResult.item.money ? ' 💵' : ''}**`,
+    `Пост: ${publishResult.message.url}`,
+  ].join('\n'));
+}
+
+/**
+ * Handles removing one price item.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the price item is removed.
+ * @skill-verified
+ */
+async function handlePriceRemove(interaction) {
+  const removeResult = await removeGuildPriceItem(
+    interaction.guildId,
+    interaction.options.getString('название', true),
+    interaction.user.id,
+  );
+  const publishResult = await publishGuildPriceList(interaction.guild, { priceList: removeResult.priceList });
+
+  await interaction.editReply([
+    `Ресурс удален из раздела **${removeResult.groupTitle}**:`,
+    `**${removeResult.item.emoji} ${removeResult.item.name}**`,
+    `Пост: ${publishResult.message.url}`,
+  ].join('\n'));
+}
+
+/**
  * Dispatches a slash command to its handler.
  * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
  * @returns {Promise<void>} Resolves after the command is handled.
@@ -1034,6 +1334,12 @@ async function dispatchCommand(interaction) {
       break;
     case 'опрос':
       await handlePoll(interaction);
+      break;
+    case 'прайс':
+      await handlePriceList(interaction);
+      break;
+    case 'прайс-настроить':
+      await handlePriceSetup(interaction);
       break;
     default:
       await replyPrivate(interaction, 'Я пока не знаю такую команду.');

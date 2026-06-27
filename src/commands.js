@@ -1,4 +1,5 @@
 import { ApplicationCommandOptionType, ChannelType, PermissionFlagsBits } from 'discord.js';
+import { PRICE_CATEGORY_CHOICES } from './price-list.js';
 
 export const COMMAND_GROUPS = [
   {
@@ -38,6 +39,16 @@ export const COMMAND_GROUPS = [
       ['снять-предупреждения', 'очистить предупреждения пользователя'],
       ['сказать', 'отправить обычное сообщение от имени бота'],
       ['объявление', 'отправить аккуратное объявление'],
+    ],
+  },
+  {
+    name: 'Расценки',
+    commands: [
+      ['прайс', 'показать актуальные расценки'],
+      ['прайс-настроить опубликовать', 'обновить главный пост с расценками'],
+      ['прайс-настроить изменить', 'изменить цену ресурса'],
+      ['прайс-настроить добавить', 'добавить новый ресурс в прайс'],
+      ['прайс-настроить удалить', 'удалить ресурс из прайса'],
     ],
   },
 ];
@@ -382,6 +393,116 @@ const COMMAND_DEFINITIONS = [
         description: 'Куда отправить опрос. Если не выбрать, будет текущий канал.',
         required: false,
         channel_types: [ChannelType.GuildText, ChannelType.GuildAnnouncement],
+      },
+    ],
+  },
+  {
+    name: 'прайс',
+    description: 'Показывает актуальные расценки ресурсов.',
+    dm_permission: false,
+  },
+  {
+    name: 'прайс-настроить',
+    description: 'Управляет актуальными расценками ресурсов.',
+    dm_permission: false,
+    default_member_permissions: permissionValue(PermissionFlagsBits.ManageGuild),
+    options: [
+      {
+        type: ApplicationCommandOptionType.Subcommand,
+        name: 'опубликовать',
+        description: 'Отправить или обновить главный пост с расценками.',
+        options: [
+          {
+            type: ApplicationCommandOptionType.Channel,
+            name: 'канал',
+            description: 'Канал с расценками. Если не выбрать, бот найдет его сам.',
+            required: false,
+            channel_types: [ChannelType.GuildText, ChannelType.GuildAnnouncement],
+          },
+        ],
+      },
+      {
+        type: ApplicationCommandOptionType.Subcommand,
+        name: 'изменить',
+        description: 'Изменить цену уже существующего ресурса.',
+        options: [
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'название',
+            description: 'Название ресурса, например: Дерево.',
+            required: true,
+            max_length: 80,
+          },
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'цена',
+            description: 'Новая цена, например: 2300.',
+            required: true,
+            max_length: 40,
+          },
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'эмодзи',
+            description: 'Новый эмодзи для строки, если нужно.',
+            required: false,
+            max_length: 20,
+          },
+        ],
+      },
+      {
+        type: ApplicationCommandOptionType.Subcommand,
+        name: 'добавить',
+        description: 'Добавить новый ресурс в прайс.',
+        options: [
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'категория',
+            description: 'Раздел прайса.',
+            required: true,
+            choices: PRICE_CATEGORY_CHOICES,
+          },
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'название',
+            description: 'Название ресурса.',
+            required: true,
+            max_length: 80,
+          },
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'цена',
+            description: 'Цена ресурса.',
+            required: true,
+            max_length: 40,
+          },
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'эмодзи',
+            description: 'Эмодзи для строки.',
+            required: false,
+            max_length: 20,
+          },
+          {
+            type: ApplicationCommandOptionType.Boolean,
+            name: 'деньги',
+            description: 'Добавлять 💵 после цены. По умолчанию да.',
+            required: false,
+          },
+        ],
+      },
+      {
+        type: ApplicationCommandOptionType.Subcommand,
+        name: 'удалить',
+        description: 'Удалить ресурс из прайса.',
+        options: [
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'название',
+            description: 'Название ресурса для удаления.',
+            required: true,
+            max_length: 80,
+          },
+        ],
       },
     ],
   },
