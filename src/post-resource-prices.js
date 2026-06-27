@@ -9,22 +9,22 @@ const PRICE_GROUPS = [
   {
     title: '🖼️ ИСКОПАЕМЫЕ / РЕСУРСЫ 🖼️',
     items: [
-      ['🪵', 'Дерево', '2300'],
-      ['☁️', 'Камень', '4000'],
+      ['🪵', 'Дерево', '2300', true],
+      ['☁️', 'Камень', '4000', true],
     ],
   },
   {
     title: '💐 ЦВЕТЫ 💐',
     items: [
-      ['💠', 'Синий цветок', '750'],
-      ['🌷', 'Розовый цветок', '750'],
-      ['🌹', 'Красный цветок', '750'],
+      ['💠', 'Синий цветок', '650', true],
+      ['🌷', 'Розовый цветок', '650', true],
+      ['🌹', 'Красный цветок', '650', true],
     ],
   },
   {
     title: '⬜ РАЗНОЕ ⬜',
     items: [
-      ['📍', 'Метка', '3500'],
+      ['📍', 'Метка', '3500', false],
     ],
   },
 ];
@@ -84,25 +84,26 @@ function findPricesChannel(channels) {
  * @param {string} emoji - Resource emoji.
  * @param {string} label - Resource name.
  * @param {string} price - Resource price.
+ * @param {boolean} showMoneyEmoji - Whether to append a money emoji after the price.
  * @returns {string} Formatted price line.
  * @skill-verified
  */
-function formatPriceLine(emoji, label, price) {
-  return `${emoji} ${label} — ${price}`;
+function formatPriceLine(emoji, label, price, showMoneyEmoji) {
+  return showMoneyEmoji ? `${emoji} ${label} — ${price} 💵` : `${emoji} ${label} — ${price}`;
 }
 
 /**
  * Appends one price group to the description lines.
  * @param {string[]} lines - Mutable description lines.
- * @param {{ title: string, items: string[][] }} group - Resource price group.
+ * @param {{ title: string, items: Array<[string, string, string, boolean]> }} group - Resource price group.
  * @returns {void} Does not return a value.
  * @skill-verified
  */
 function appendPriceGroup(lines, group) {
   lines.push(group.title);
 
-  for (const [emoji, label, price] of group.items) {
-    lines.push(formatPriceLine(emoji, label, price));
+  for (const [emoji, label, price, showMoneyEmoji] of group.items) {
+    lines.push(formatPriceLine(emoji, label, price, showMoneyEmoji));
   }
 
   lines.push('');
@@ -115,13 +116,6 @@ function appendPriceGroup(lines, group) {
  */
 function buildResourcePricesDescription() {
   const lines = [
-    '💗',
-    '📌 Требуются активные сборщики ресурсов и люди, которые хотят стабильно зарабатывать!',
-    '',
-    '🎄 Наша корпорация преимущественно занимается деревом — это основное направление работы, поэтому особенно ждем тех, кто готов активно заготавливать дерево и зарабатывать вместе с нами.',
-    '',
-    DIVIDER,
-    '',
     '💵 ОПЛАТА ЗА РЕСУРСЫ 💵',
     '',
   ];
@@ -142,7 +136,7 @@ function buildResourcePricesDescription() {
 function buildResourcePricesEmbed() {
   return new EmbedBuilder()
     .setColor(0x2fbf71)
-    .setTitle(`💗 Набор в корпорацию «${CORPORATION_NAME}» 💗`)
+    .setTitle(`💵 Расценки «${CORPORATION_NAME}»`)
     .setDescription(buildResourcePricesDescription())
     .setFooter({ text: 'KILLA FAMQ • Актуальные расценки' })
     .setTimestamp();
