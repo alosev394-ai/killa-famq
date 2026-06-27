@@ -12,6 +12,8 @@ const LOG_CHANNEL_KEYWORDS = ['лог', 'logs', 'журнал'];
 const MISSING_LOG_CHANNEL_GUILDS = new Set();
 const MAX_FIELD_LENGTH = 1024;
 const MAX_DESCRIPTION_LENGTH = 3900;
+const MESSAGE_DELETE_AUDIT_LOG_WINDOW_MS = 7000;
+const ROLE_AUDIT_LOG_WINDOW_MS = 10000;
 const VOICE_AUDIT_LOG_WINDOW_MS = 7000;
 let activeConfig = {};
 
@@ -117,11 +119,16 @@ async function handleMessageDelete(message) {
     return;
   }
 
-  const embed = buildLogEmbed('🗑️ Сообщение удалено', formatMessageContent(message.content), LOG_COLORS.danger)
+  const deleteAuditEntry = await findRecentMessageDeleteAuditEntry(message);
+  const embed = buildLogEmbed(getMessageDeleteTitle(deleteAuditEntry), formatMessageContent(message.content), LOG_COLORS.danger)
     .addFields(
       buildField('Автор', message.author ? formatUser(message.author) : 'Неизвестно', true),
       buildField('Канал', formatChannelReference(message.channel), true),
     );
+
+  if (deleteAuditEntry?.executor) {
+    embed.addFields(buildField('Удалил', formatUser(deleteAuditEntry.executor), true));
+  }
 
   const attachmentText = formatAttachments(message.attachments);
 
@@ -144,8 +151,13 @@ async function handleMessageBulkDelete(messages, channel) {
     return;
   }
 
+  const deleteAuditEntry = await findRecentBulkMessageDeleteAuditEntry(channel);
   const embed = buildLogEmbed('🧹 Массовое удаление сообщений', `Удалено сообщений: **${messages.size}**`, LOG_COLORS.danger)
     .addFields(buildField('Канал', formatChannelReference(channel), true));
+
+  if (deleteAuditEntry?.executor) {
+    embed.addFields(buildField('Удалил', formatUser(deleteAuditEntry.executor), true));
+  }
 
   const sample = formatDeletedMessageSample(messages);
 
@@ -154,6 +166,100 @@ async function handleMessageBulkDelete(messages, channel) {
   }
 
   await sendGuildLog(channel.guild, embed);
+}
+
+/**
+ * Finds a recent audit-log entry for a single deleted message.
+ * @param {import('discord.js').Message | import('discord.js').PartialMessage} message - Deleted Discord message.
+ * @returns {Promise<import('discord.js').GuildAuditLogsEntry | null>} Recent delete audit entry or null.
+ * @skill-verified
+ */
+async function findRecentMessageDeleteAuditEntry(message) {
+  if (!await canViewGuildAuditLog(message.guild)) {
+    return null;
+  }
+
+  try {
+    const auditLogs = await message.guild.fetchAuditLogs({ type: AuditLogEvent.MessageDelete, limit: 6 });
+    const now = Date.now();
+
+    for (const [, entry] of auditLogs.entries) {
+      if (now - entry.createdTimestamp > MESSAGE_DELETE_AUDIT_LOG_WINDOW_MS) {
+        continue;
+      }
+
+      if (isMessageDeleteEntryForMessage(entry, message)) {
+        return entry;
+      }
+    }
+  } catch (error) {
+    console.error(`Не удалось прочитать audit log удаления сообщения в ${message.guild.name}:`, error);
+  }
+
+  return null;
+}
+
+/**
+ * Finds a recent audit-log entry for bulk message deletion.
+ * @param {import('discord.js').GuildTextBasedChannel} channel - Channel where messages were deleted.
+ * @returns {Promise<import('discord.js').GuildAuditLogsEntry | null>} Recent bulk delete audit entry or null.
+ * @skill-verified
+ */
+async function findRecentBulkMessageDeleteAuditEntry(channel) {
+  if (!await canViewGuildAuditLog(channel.guild)) {
+    return null;
+  }
+
+  try {
+    const auditLogs = await channel.guild.fetchAuditLogs({ type: AuditLogEvent.MessageBulkDelete, limit: 4 });
+    const now = Date.now();
+
+    for (const [, entry] of auditLogs.entries) {
+      if (now - entry.createdTimestamp > MESSAGE_DELETE_AUDIT_LOG_WINDOW_MS) {
+        continue;
+      }
+
+      if (getAuditEntryChannelId(entry) === channel.id || !getAuditEntryChannelId(entry)) {
+        return entry;
+      }
+    }
+  } catch (error) {
+    console.error(`Не удалось прочитать audit log массового удаления в ${channel.guild.name}:`, error);
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether an audit entry likely belongs to the deleted message.
+ * @param {import('discord.js').GuildAuditLogsEntry} entry - Audit log entry.
+ * @param {import('discord.js').Message | import('discord.js').PartialMessage} message - Deleted Discord message.
+ * @returns {boolean} True when the audit entry likely matches the deletion.
+ * @skill-verified
+ */
+function isMessageDeleteEntryForMessage(entry, message) {
+  const targetId = entry.target?.id;
+  const channelId = getAuditEntryChannelId(entry);
+
+  if (message.author?.id && targetId && targetId !== message.author.id) {
+    return false;
+  }
+
+  if (message.channelId && channelId && channelId !== message.channelId) {
+    return false;
+  }
+
+  return Boolean(entry.executor);
+}
+
+/**
+ * Returns a message delete title based on audit-log context.
+ * @param {import('discord.js').GuildAuditLogsEntry | null} deleteAuditEntry - Matching delete audit entry.
+ * @returns {string} Message delete log title.
+ * @skill-verified
+ */
+function getMessageDeleteTitle(deleteAuditEntry) {
+  return deleteAuditEntry?.executor ? '🗑️ Сообщение удалил модератор' : '🗑️ Сообщение удалено';
 }
 
 /**
@@ -230,14 +336,18 @@ async function handleGuildMemberRemove(member) {
  */
 async function handleGuildMemberUpdate(oldMember, newMember) {
   const fields = [];
+  const roleChanges = getMemberRoleChanges(oldMember, newMember);
 
   if (oldMember.nickname !== newMember.nickname) {
     fields.push(buildField('Ник был', oldMember.nickname || newMember.user.username, true));
     fields.push(buildField('Ник стал', newMember.nickname || newMember.user.username, true));
   }
 
-  appendRoleChanges(fields, oldMember, newMember);
   appendTimeoutChange(fields, oldMember, newMember);
+
+  if (roleChanges.addedRoles.length > 0 || roleChanges.removedRoles.length > 0) {
+    await sendRoleChangeLogs(newMember, roleChanges);
+  }
 
   if (fields.length === 0) {
     return;
@@ -380,9 +490,7 @@ async function handleVoiceStateUpdate(oldState, newState) {
  * @skill-verified
  */
 async function findRecentVoiceMoveAuditEntry(state) {
-  const me = state.guild.members.me || await state.guild.members.fetchMe();
-
-  if (!me.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
+  if (!await canViewGuildAuditLog(state.guild)) {
     return null;
   }
 
@@ -414,9 +522,7 @@ async function findRecentVoiceMoveAuditEntry(state) {
  * @skill-verified
  */
 function isVoiceMoveEntryForState(entry, state) {
-  const extraChannelId = entry.extra && typeof entry.extra === 'object' && 'channel' in entry.extra
-    ? entry.extra.channel?.id
-    : null;
+  const extraChannelId = getAuditEntryChannelId(entry);
 
   if (extraChannelId && state.channelId && extraChannelId !== state.channelId) {
     return false;
@@ -426,14 +532,13 @@ function isVoiceMoveEntryForState(entry, state) {
 }
 
 /**
- * Adds role changes to an embed field list.
- * @param {import('discord.js').APIEmbedField[]} fields - Mutable embed fields.
+ * Returns role changes between two member states.
  * @param {import('discord.js').GuildMember | import('discord.js').PartialGuildMember} oldMember - Previous member state.
  * @param {import('discord.js').GuildMember} newMember - New member state.
- * @returns {void}
+ * @returns {{ addedRoles: import('discord.js').Role[], removedRoles: import('discord.js').Role[] }} Added and removed roles.
  * @skill-verified
  */
-function appendRoleChanges(fields, oldMember, newMember) {
+function getMemberRoleChanges(oldMember, newMember) {
   const addedRoles = [];
   const removedRoles = [];
 
@@ -449,13 +554,144 @@ function appendRoleChanges(fields, oldMember, newMember) {
     }
   }
 
-  if (addedRoles.length > 0) {
-    fields.push(buildField('Роли добавлены', formatRoleList(addedRoles), false));
+  return { addedRoles, removedRoles };
+}
+
+/**
+ * Sends separate logs for added and removed member roles.
+ * @param {import('discord.js').GuildMember} member - Member whose roles changed.
+ * @param {{ addedRoles: import('discord.js').Role[], removedRoles: import('discord.js').Role[] }} roleChanges - Role changes.
+ * @returns {Promise<void>} Resolves after role logs are sent.
+ * @skill-verified
+ */
+async function sendRoleChangeLogs(member, roleChanges) {
+  if (roleChanges.addedRoles.length > 0) {
+    await sendRoleChangeLog(member, roleChanges.addedRoles, 'add');
   }
 
-  if (removedRoles.length > 0) {
-    fields.push(buildField('Роли сняты', formatRoleList(removedRoles), false));
+  if (roleChanges.removedRoles.length > 0) {
+    await sendRoleChangeLog(member, roleChanges.removedRoles, 'remove');
   }
+}
+
+/**
+ * Sends one role change log.
+ * @param {import('discord.js').GuildMember} member - Member whose roles changed.
+ * @param {import('discord.js').Role[]} roles - Changed roles.
+ * @param {'add' | 'remove'} action - Role change action.
+ * @returns {Promise<void>} Resolves after the role log is sent.
+ * @skill-verified
+ */
+async function sendRoleChangeLog(member, roles, action) {
+  const auditEntry = await findRecentRoleAuditEntry(member, roles, action);
+  const embed = buildLogEmbed(getRoleChangeTitle(action, roles), formatUser(member.user), action === 'add' ? LOG_COLORS.ok : LOG_COLORS.warn)
+    .addFields(
+      buildField(roles.length === 1 ? 'Роль' : 'Роли', formatRoleList(roles), false),
+      buildField(action === 'add' ? 'Выдал' : 'Снял', auditEntry?.executor ? formatUser(auditEntry.executor) : 'Не удалось определить', true),
+    );
+
+  await sendGuildLog(member.guild, embed);
+}
+
+/**
+ * Finds a recent audit-log entry for a member role change.
+ * @param {import('discord.js').GuildMember} member - Member whose roles changed.
+ * @param {import('discord.js').Role[]} roles - Roles to match.
+ * @param {'add' | 'remove'} action - Role change action.
+ * @returns {Promise<import('discord.js').GuildAuditLogsEntry | null>} Recent role audit entry or null.
+ * @skill-verified
+ */
+async function findRecentRoleAuditEntry(member, roles, action) {
+  if (!await canViewGuildAuditLog(member.guild)) {
+    return null;
+  }
+
+  try {
+    const auditLogs = await member.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 8 });
+    const now = Date.now();
+
+    for (const [, entry] of auditLogs.entries) {
+      if (now - entry.createdTimestamp > ROLE_AUDIT_LOG_WINDOW_MS) {
+        continue;
+      }
+
+      if (isRoleAuditEntryForChange(entry, member, roles, action)) {
+        return entry;
+      }
+    }
+  } catch (error) {
+    console.error(`Не удалось прочитать audit log изменения ролей в ${member.guild.name}:`, error);
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether an audit entry likely belongs to a role change.
+ * @param {import('discord.js').GuildAuditLogsEntry} entry - Audit log entry.
+ * @param {import('discord.js').GuildMember} member - Member whose roles changed.
+ * @param {import('discord.js').Role[]} roles - Changed roles.
+ * @param {'add' | 'remove'} action - Role change action.
+ * @returns {boolean} True when the audit entry likely matches the role change.
+ * @skill-verified
+ */
+function isRoleAuditEntryForChange(entry, member, roles, action) {
+  if (entry.target?.id && entry.target.id !== member.id) {
+    return false;
+  }
+
+  const auditRoleIds = getAuditEntryRoleIds(entry, action);
+
+  if (auditRoleIds.length === 0) {
+    return Boolean(entry.executor);
+  }
+
+  return roles.some((role) => auditRoleIds.includes(role.id));
+}
+
+/**
+ * Returns role IDs from an audit-log entry for a role action.
+ * @param {import('discord.js').GuildAuditLogsEntry} entry - Audit log entry.
+ * @param {'add' | 'remove'} action - Role change action.
+ * @returns {string[]} Role IDs from the audit entry.
+ * @skill-verified
+ */
+function getAuditEntryRoleIds(entry, action) {
+  const changeKey = action === 'add' ? '$add' : '$remove';
+  const changes = Array.isArray(entry.changes) ? entry.changes : [];
+  const roleIds = [];
+
+  for (const change of changes) {
+    if (change.key !== changeKey) {
+      continue;
+    }
+
+    const rawRoleValues = change.new || change.old || [];
+    const roleValues = Array.isArray(rawRoleValues) ? rawRoleValues : [rawRoleValues];
+
+    for (const roleValue of roleValues) {
+      if (roleValue?.id) {
+        roleIds.push(roleValue.id);
+      }
+    }
+  }
+
+  return roleIds;
+}
+
+/**
+ * Returns a role change log title.
+ * @param {'add' | 'remove'} action - Role change action.
+ * @param {import('discord.js').Role[]} roles - Changed roles.
+ * @returns {string} Role change title.
+ * @skill-verified
+ */
+function getRoleChangeTitle(action, roles) {
+  if (action === 'add') {
+    return roles.length === 1 ? '🎖️ Роль выдана' : '🎖️ Роли выданы';
+  }
+
+  return roles.length === 1 ? '🎖️ Роль снята' : '🎖️ Роли сняты';
 }
 
 /**
@@ -590,6 +826,45 @@ async function canSendLogToChannel(channel) {
   const permissions = channel.permissionsFor(me);
 
   return Boolean(permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks]));
+}
+
+/**
+ * Checks whether the bot can read a guild audit log.
+ * @param {import('discord.js').Guild} guild - Guild to check.
+ * @returns {Promise<boolean>} True when audit log can be read.
+ * @skill-verified
+ */
+async function canViewGuildAuditLog(guild) {
+  const me = guild.members.me || await guild.members.fetchMe();
+  return me.permissions.has(PermissionFlagsBits.ViewAuditLog);
+}
+
+/**
+ * Returns the channel ID stored on an audit-log entry.
+ * @param {import('discord.js').GuildAuditLogsEntry} entry - Audit log entry.
+ * @returns {string | null} Channel ID or null.
+ * @skill-verified
+ */
+function getAuditEntryChannelId(entry) {
+  if (!entry.extra || typeof entry.extra !== 'object') {
+    return null;
+  }
+
+  if ('channel' in entry.extra) {
+    if (typeof entry.extra.channel === 'string') {
+      return entry.extra.channel;
+    }
+
+    if (entry.extra.channel?.id) {
+      return entry.extra.channel.id;
+    }
+  }
+
+  if ('channelId' in entry.extra && typeof entry.extra.channelId === 'string') {
+    return entry.extra.channelId;
+  }
+
+  return null;
 }
 
 /**
