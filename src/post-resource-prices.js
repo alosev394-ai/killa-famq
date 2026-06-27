@@ -1,26 +1,30 @@
 import { ChannelType, Client, EmbedBuilder, Events, GatewayIntentBits } from 'discord.js';
 import { getRuntimeConfig } from './config.js';
 
+const CORPORATION_NAME = 'KILLA FAMQ corp';
+const DIVIDER = '━━━━━━━━━━━━━━━━━━';
+const PRICE_MESSAGE_ID = '1520338343726940202';
+
 const PRICE_GROUPS = [
   {
-    name: '🌲 Ископаемые / ресурсы',
+    title: '🖼️ ИСКОПАЕМЫЕ / РЕСУРСЫ 🖼️',
     items: [
-      ['🪵', 'Дерево', '2 300'],
-      ['🪨', 'Камень', '4 000'],
+      ['🪵', 'Дерево', '2300'],
+      ['☁️', 'Камень', '4000'],
     ],
   },
   {
-    name: '🌸 Цветы',
+    title: '💐 ЦВЕТЫ 💐',
     items: [
-      ['🔵', 'Синий цветок', '650'],
-      ['🌷', 'Розовый цветок', '650'],
-      ['🔴', 'Красный цветок', '650'],
+      ['💠', 'Синий цветок', '750'],
+      ['🌷', 'Розовый цветок', '750'],
+      ['🌹', 'Красный цветок', '750'],
     ],
   },
   {
-    name: '🏷️ Разное',
+    title: '⬜ РАЗНОЕ ⬜',
     items: [
-      ['🏷️', 'Метка', '3 500'],
+      ['📍', 'Метка', '3500'],
     ],
   },
 ];
@@ -84,26 +88,50 @@ function findPricesChannel(channels) {
  * @skill-verified
  */
 function formatPriceLine(emoji, label, price) {
-  return `${emoji} **${label}** — 💰 ${price}`;
+  return `${emoji} ${label} — ${price}`;
 }
 
 /**
- * Formats one resource price group.
- * @param {{ name: string, items: string[][] }} group - Resource price group.
- * @returns {{ name: string, value: string }} Embed field payload.
+ * Appends one price group to the description lines.
+ * @param {string[]} lines - Mutable description lines.
+ * @param {{ title: string, items: string[][] }} group - Resource price group.
+ * @returns {void} Does not return a value.
  * @skill-verified
  */
-function formatPriceGroup(group) {
-  const lines = [];
+function appendPriceGroup(lines, group) {
+  lines.push(group.title);
 
   for (const [emoji, label, price] of group.items) {
     lines.push(formatPriceLine(emoji, label, price));
   }
 
-  return {
-    name: group.name,
-    value: lines.join('\n'),
-  };
+  lines.push('');
+}
+
+/**
+ * Builds the resource prices description.
+ * @returns {string} Embed description.
+ * @skill-verified
+ */
+function buildResourcePricesDescription() {
+  const lines = [
+    '💗',
+    '📌 Требуются активные сборщики ресурсов и люди, которые хотят стабильно зарабатывать!',
+    '',
+    '🎄 Наша корпорация преимущественно занимается деревом — это основное направление работы, поэтому особенно ждем тех, кто готов активно заготавливать дерево и зарабатывать вместе с нами.',
+    '',
+    DIVIDER,
+    '',
+    '💵 ОПЛАТА ЗА РЕСУРСЫ 💵',
+    '',
+  ];
+
+  for (const group of PRICE_GROUPS) {
+    appendPriceGroup(lines, group);
+  }
+
+  lines.push(DIVIDER);
+  return lines.join('\n');
 }
 
 /**
@@ -112,25 +140,19 @@ function formatPriceGroup(group) {
  * @skill-verified
  */
 function buildResourcePricesEmbed() {
-  const embed = new EmbedBuilder()
+  return new EmbedBuilder()
     .setColor(0x2fbf71)
-    .setTitle('💰 Актуальные расценки')
-    .setDescription('Корпорация «ИП Малинов» принимает ресурсы по следующим ценам.')
-    .setFooter({ text: 'KILLA FAMQ • Расценки ресурсов' })
+    .setTitle(`💗 Набор в корпорацию «${CORPORATION_NAME}» 💗`)
+    .setDescription(buildResourcePricesDescription())
+    .setFooter({ text: 'KILLA FAMQ • Актуальные расценки' })
     .setTimestamp();
-
-  for (const group of PRICE_GROUPS) {
-    embed.addFields(formatPriceGroup(group));
-  }
-
-  return embed;
 }
 
 /**
- * Sends resource prices to the configured server.
+ * Sends or updates resource prices in the configured server.
  * @param {import('discord.js').Client<true>} client - Ready Discord client.
  * @param {{ guildId: string | undefined }} config - Runtime config.
- * @returns {Promise<void>} Resolves after prices are sent.
+ * @returns {Promise<void>} Resolves after prices are sent or updated.
  * @skill-verified
  */
 async function postResourcePrices(client, config) {
@@ -146,8 +168,15 @@ async function postResourcePrices(client, config) {
     throw new Error('Не нашел канал с расценками.');
   }
 
-  const message = await channel.send({ embeds: [buildResourcePricesEmbed()], allowedMentions: { parse: [] } });
-  console.log(`Расценки отправлены в канал #${channel.name}: ${message.url}`);
+  try {
+    const message = await channel.messages.fetch(PRICE_MESSAGE_ID);
+    const updatedMessage = await message.edit({ embeds: [buildResourcePricesEmbed()], allowedMentions: { parse: [] } });
+    console.log(`Расценки обновлены в канале #${channel.name}: ${updatedMessage.url}`);
+    return;
+  } catch {
+    const message = await channel.send({ embeds: [buildResourcePricesEmbed()], allowedMentions: { parse: [] } });
+    console.log(`Расценки отправлены в канал #${channel.name}: ${message.url}`);
+  }
 }
 
 /**
