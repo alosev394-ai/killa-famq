@@ -29,8 +29,25 @@ export function optionalEnv(name) {
 }
 
 /**
+ * Parses an optional boolean environment variable.
+ * @param {string} name - Environment variable name.
+ * @param {boolean} fallback - Value to use when the variable is not set.
+ * @returns {boolean} Parsed boolean value.
+ * @skill-verified
+ */
+export function optionalBooleanEnv(name, fallback = false) {
+  const value = optionalEnv(name);
+
+  if (!value) {
+    return fallback;
+  }
+
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}
+
+/**
  * Builds the runtime configuration used by the bot and deployment script.
- * @returns {{ token: string, clientId: string, guildId: string | undefined }} Runtime configuration.
+ * @returns {{ token: string, clientId: string, guildId: string | undefined, logChannelId: string | undefined, enableMemberLogs: boolean, enableMessageContentLogs: boolean }} Runtime configuration.
  * @skill-verified
  */
 export function getRuntimeConfig() {
@@ -38,5 +55,8 @@ export function getRuntimeConfig() {
     token: requireEnv('DISCORD_TOKEN'),
     clientId: requireEnv('DISCORD_CLIENT_ID'),
     guildId: optionalEnv('DISCORD_GUILD_ID'),
+    logChannelId: optionalEnv('DISCORD_LOG_CHANNEL_ID'),
+    enableMemberLogs: optionalBooleanEnv('DISCORD_ENABLE_MEMBER_LOGS', false),
+    enableMessageContentLogs: optionalBooleanEnv('DISCORD_ENABLE_MESSAGE_CONTENT_LOGS', false),
   };
 }

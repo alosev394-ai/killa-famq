@@ -4,13 +4,13 @@ import {
   Client,
   EmbedBuilder,
   Events,
-  GatewayIntentBits,
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
 import { COMMAND_GROUPS } from './commands.js';
 import { getRuntimeConfig } from './config.js';
 import { FORM_IDS, buildInviteRequestModal, buildRoleRequestModal, buildSalesLotModal } from './form-components.js';
+import { buildLogIntents, buildLogPartials, registerLogHandlers, sendStartupLogs } from './logging.js';
 import {
   addGuildRule,
   addWarning,
@@ -1085,6 +1085,7 @@ async function handleReady(client) {
     activities: [{ name: 'русские команды | /помощь', type: ActivityType.Watching }],
   });
 
+  await sendStartupLogs(client);
   console.log(`KILLA FAMQ запущен как ${client.user.tag}.`);
 }
 
@@ -1095,9 +1096,10 @@ async function handleReady(client) {
  */
 async function startBot() {
   const config = getRuntimeConfig();
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new Client({ intents: buildLogIntents(config), partials: buildLogPartials() });
 
   client.once(Events.ClientReady, handleReady);
+  registerLogHandlers(client, config);
   client.on(Events.InteractionCreate, handleInteraction);
 
   await client.login(config.token);
