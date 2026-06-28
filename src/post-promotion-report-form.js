@@ -3,6 +3,8 @@ import { getRuntimeConfig } from './config.js';
 import { buildPromotionReportButtonRow } from './form-components.js';
 import { buildPromotionReportFormEmbed } from './promotion-system.js';
 
+const FALLBACK_PROMOTION_REPORT_MESSAGE_ID = '1520873484165709826';
+
 /**
  * Normalizes a Discord channel name for fuzzy matching.
  * @param {string} value - Raw channel name.
@@ -93,12 +95,29 @@ async function postPromotionReportForm(client, config) {
     throw new Error('Не нашел канал отчётов на повышение.');
   }
 
-  const message = await channel.send({
+  const message = await sendOrEditPromotionReportForm(channel);
+  console.log(`Форма отчётов на повышение обновлена в канале #${channel.name}: ${message.url}`);
+}
+
+/**
+ * Sends a new promotion report form message or edits the existing one.
+ * @param {import('discord.js').GuildTextBasedChannel} channel - Promotion report channel.
+ * @returns {Promise<import('discord.js').Message>} Sent or edited message.
+ * @skill-verified
+ */
+async function sendOrEditPromotionReportForm(channel) {
+  const payload = {
     embeds: [buildPromotionReportFormEmbed()],
     components: [buildPromotionReportButtonRow()],
     allowedMentions: { parse: [] },
-  });
-  console.log(`Форма отчётов на повышение отправлена в канал #${channel.name}: ${message.url}`);
+  };
+
+  try {
+    const message = await channel.messages.fetch(FALLBACK_PROMOTION_REPORT_MESSAGE_ID);
+    return await message.edit(payload);
+  } catch {
+    return channel.send(payload);
+  }
 }
 
 /**

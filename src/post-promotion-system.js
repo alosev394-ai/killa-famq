@@ -2,6 +2,8 @@ import { ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits } f
 import { getRuntimeConfig } from './config.js';
 import { buildPromotionSystemEmbed } from './promotion-system.js';
 
+const FALLBACK_PROMOTION_SYSTEM_MESSAGE_ID = '1520873413424447622';
+
 /**
  * Normalizes a Discord channel name for fuzzy matching.
  * @param {string} value - Raw channel name.
@@ -90,8 +92,24 @@ async function postPromotionSystem(client, config) {
     throw new Error('Не нашел канал системы повышения.');
   }
 
-  const message = await channel.send({ embeds: [buildPromotionSystemEmbed()], allowedMentions: { parse: [] } });
-  console.log(`Система повышения отправлена в канал #${channel.name}: ${message.url}`);
+  const message = await sendOrEditPromotionSystemMessage(channel, buildPromotionSystemEmbed());
+  console.log(`Система повышения обновлена в канале #${channel.name}: ${message.url}`);
+}
+
+/**
+ * Sends a new promotion system message or edits the existing one.
+ * @param {import('discord.js').GuildTextBasedChannel} channel - Promotion system channel.
+ * @param {import('discord.js').EmbedBuilder} embed - Promotion system embed.
+ * @returns {Promise<import('discord.js').Message>} Sent or edited message.
+ * @skill-verified
+ */
+async function sendOrEditPromotionSystemMessage(channel, embed) {
+  try {
+    const message = await channel.messages.fetch(FALLBACK_PROMOTION_SYSTEM_MESSAGE_ID);
+    return await message.edit({ embeds: [embed], allowedMentions: { parse: [] } });
+  } catch {
+    return channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+  }
 }
 
 /**

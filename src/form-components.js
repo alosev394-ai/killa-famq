@@ -193,6 +193,6 @@ export function buildPromotionReportModal() {
       createTextInputRow(FORM_IDS.promotionCid, 'Ваш CID', TextInputStyle.Short, true, 50, 'Например: 122'),
       createTextInputRow(FORM_IDS.promotionCurrentRank, 'Текущий ранг', TextInputStyle.Short, true, 80, 'Например: 2 | KILLA'),
       createTextInputRow(FORM_IDS.promotionTargetRank, 'Хочу на ранг', TextInputStyle.Short, true, 80, 'Например: 3 | OLD KILLA'),
-      createTextInputRow(FORM_IDS.promotionReport, 'Отчёт / доказательства', TextInputStyle.Paragraph, true, 900, 'Дерево, дни активности, помощь, ссылки на скрины/видео'),
+      createTextInputRow(FORM_IDS.promotionReport, 'Сколько дерева собрал', TextInputStyle.Short, true, 100, 'Например: 1200 дерева'),
     );
 }
