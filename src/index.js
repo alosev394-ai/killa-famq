@@ -9,7 +9,14 @@ import {
 } from 'discord.js';
 import { COMMAND_GROUPS } from './commands.js';
 import { getRuntimeConfig } from './config.js';
-import { FORM_IDS, buildInviteRequestModal, buildRoleRequestModal, buildSalesLotModal, buildSalesLotStatusButtonRow } from './form-components.js';
+import {
+  FORM_IDS,
+  buildInviteRequestModal,
+  buildPromotionReportModal,
+  buildRoleRequestModal,
+  buildSalesLotModal,
+  buildSalesLotStatusButtonRow,
+} from './form-components.js';
 import { buildLogIntents, buildLogPartials, registerLogHandlers, sendStartupLogs } from './logging.js';
 import {
   addGuildPriceItem,
@@ -434,6 +441,30 @@ function buildInviteSubmissionEmbed(user, data) {
 }
 
 /**
+ * Builds an embed for a submitted promotion report.
+ * @param {import('discord.js').User} user - User who submitted the form.
+ * @param {{ nickname: string, cid: string, currentRank: string, targetRank: string, report: string }} data - Submitted promotion report data.
+ * @returns {EmbedBuilder} Promotion report submission embed.
+ * @skill-verified
+ */
+function buildPromotionSubmissionEmbed(user, data) {
+  return new EmbedBuilder()
+    .setColor(BRAND.ok)
+    .setTitle('📈 Отчёт на повышение')
+    .setDescription(`<@${user.id}>`)
+    .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ size: 128 }) })
+    .addFields(
+      { name: 'Игровой ник', value: truncateFieldValue(data.nickname, 1024), inline: true },
+      { name: 'CID', value: truncateFieldValue(data.cid, 1024), inline: true },
+      { name: 'Текущий ранг', value: truncateFieldValue(data.currentRank, 1024), inline: true },
+      { name: 'Хочет на ранг', value: truncateFieldValue(data.targetRank, 1024), inline: true },
+      { name: 'Отчёт / доказательства', value: truncateFieldValue(data.report, 1024) },
+    )
+    .setFooter({ text: 'KILLA FAMQ • Повышение' })
+    .setTimestamp();
+}
+
+/**
  * Sends a submitted form embed to the current channel.
  * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
  * @param {EmbedBuilder} embed - Submission embed.
@@ -608,6 +639,11 @@ async function handleFormButton(interaction) {
     return true;
   }
 
+  if (interaction.customId === FORM_IDS.promotionButton) {
+    await interaction.showModal(buildPromotionReportModal());
+    return true;
+  }
+
   return false;
 }
 
@@ -660,6 +696,24 @@ async function handleInviteRequestModal(interaction) {
 }
 
 /**
+ * Handles promotion report modal submissions.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @returns {Promise<void>} Resolves after the promotion report is handled.
+ * @skill-verified
+ */
+async function handlePromotionReportModal(interaction) {
+  const embed = buildPromotionSubmissionEmbed(interaction.user, {
+    nickname: getModalTextValue(interaction, FORM_IDS.promotionNickname),
+    cid: getModalTextValue(interaction, FORM_IDS.promotionCid),
+    currentRank: getModalTextValue(interaction, FORM_IDS.promotionCurrentRank),
+    targetRank: getModalTextValue(interaction, FORM_IDS.promotionTargetRank),
+    report: getModalTextValue(interaction, FORM_IDS.promotionReport),
+  });
+
+  await sendSubmissionEmbed(interaction, embed);
+}
+
+/**
  * Handles interactive modal submissions.
  * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
  * @returns {Promise<boolean>} True when the modal was handled.
@@ -678,6 +732,11 @@ async function handleFormModal(interaction) {
 
   if (interaction.customId === FORM_IDS.inviteModal) {
     await handleInviteRequestModal(interaction);
+    return true;
+  }
+
+  if (interaction.customId === FORM_IDS.promotionModal) {
+    await handlePromotionReportModal(interaction);
     return true;
   }
 

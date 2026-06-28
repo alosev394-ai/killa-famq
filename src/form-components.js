@@ -25,6 +25,13 @@ export const FORM_IDS = Object.freeze({
   inviteModal: 'killa_invite_request_submit',
   inviteRequester: 'invite_requester',
   inviteGuest: 'invite_guest',
+  promotionButton: 'killa_promotion_report_open',
+  promotionModal: 'killa_promotion_report_submit',
+  promotionNickname: 'promotion_nickname',
+  promotionCid: 'promotion_cid',
+  promotionCurrentRank: 'promotion_current_rank',
+  promotionTargetRank: 'promotion_target_rank',
+  promotionReport: 'promotion_report',
 });
 
 /**
@@ -116,6 +123,15 @@ export function buildInviteRequestButtonRow() {
 }
 
 /**
+ * Builds the promotion report button row.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Promotion report button row.
+ * @skill-verified
+ */
+export function buildPromotionReportButtonRow() {
+  return createButtonRow(FORM_IDS.promotionButton, 'Создать отчёт', ButtonStyle.Success);
+}
+
+/**
  * Builds the role request modal.
  * @returns {ModalBuilder} Role request modal.
  * @skill-verified
@@ -160,5 +176,23 @@ export function buildInviteRequestModal() {
     .addComponents(
       createTextInputRow(FORM_IDS.inviteRequester, 'Ваш ник | CID', TextInputStyle.Short, true, 100, 'Например: Гоша Килла | 122'),
       createTextInputRow(FORM_IDS.inviteGuest, 'Ник | CID приглашённого', TextInputStyle.Short, true, 100, 'Например: Саня | 345'),
+    );
+}
+
+/**
+ * Builds the promotion report modal.
+ * @returns {ModalBuilder} Promotion report modal.
+ * @skill-verified
+ */
+export function buildPromotionReportModal() {
+  return new ModalBuilder()
+    .setCustomId(FORM_IDS.promotionModal)
+    .setTitle('Отчёт на повышение')
+    .addComponents(
+      createTextInputRow(FORM_IDS.promotionNickname, 'Ваш ник', TextInputStyle.Short, true, 100, 'Например: Гоша Килла'),
+      createTextInputRow(FORM_IDS.promotionCid, 'Ваш CID', TextInputStyle.Short, true, 50, 'Например: 122'),
+      createTextInputRow(FORM_IDS.promotionCurrentRank, 'Текущий ранг', TextInputStyle.Short, true, 80, 'Например: 2 | KILLA'),
+      createTextInputRow(FORM_IDS.promotionTargetRank, 'Хочу на ранг', TextInputStyle.Short, true, 80, 'Например: 3 | OLD KILLA'),
+      createTextInputRow(FORM_IDS.promotionReport, 'Отчёт / доказательства', TextInputStyle.Paragraph, true, 900, 'Дерево, дни активности, помощь, ссылки на скрины/видео'),
     );
 }
