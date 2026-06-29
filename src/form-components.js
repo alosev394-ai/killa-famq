@@ -8,11 +8,6 @@ import {
 } from 'discord.js';
 
 export const FORM_IDS = Object.freeze({
-  roleButton: 'killa_role_request_open',
-  roleModal: 'killa_role_request_submit',
-  roleNickname: 'role_nickname',
-  roleStatic: 'role_static',
-  roleScreenshot: 'role_screenshot',
   salesButton: 'killa_sales_lot_open',
   salesModal: 'killa_sales_lot_submit',
   salesItem: 'sales_item',
@@ -32,6 +27,14 @@ export const FORM_IDS = Object.freeze({
   promotionCurrentRank: 'promotion_current_rank',
   promotionTargetRank: 'promotion_target_rank',
   promotionReport: 'promotion_report',
+  membershipFamilyButton: 'killa_membership_family_open',
+  membershipCorpButton: 'killa_membership_corp_open',
+  membershipFamilyModal: 'killa_membership_family_submit',
+  membershipCorpModal: 'killa_membership_corp_submit',
+  membershipNickname: 'membership_nickname',
+  membershipCid: 'membership_cid',
+  membershipRank: 'membership_rank',
+  membershipCloseButton: 'killa_membership_ticket_close',
 });
 
 /**
@@ -72,15 +75,6 @@ function createTextInputRow(customId, label, style, required, maxLength, placeho
       .setMaxLength(maxLength)
       .setPlaceholder(placeholder),
   );
-}
-
-/**
- * Builds the role request button row.
- * @returns {ActionRowBuilder<ButtonBuilder>} Role request button row.
- * @skill-verified
- */
-export function buildRoleRequestButtonRow() {
-  return createButtonRow(FORM_IDS.roleButton, 'Создать заявку', ButtonStyle.Secondary);
 }
 
 /**
@@ -132,19 +126,37 @@ export function buildPromotionReportButtonRow() {
 }
 
 /**
- * Builds the role request modal.
- * @returns {ModalBuilder} Role request modal.
+ * Builds the membership request type button row.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Membership request button row.
  * @skill-verified
  */
-export function buildRoleRequestModal() {
-  return new ModalBuilder()
-    .setCustomId(FORM_IDS.roleModal)
-    .setTitle('Подача на получение роли')
-    .addComponents(
-      createTextInputRow(FORM_IDS.roleNickname, 'Игровой ник', TextInputStyle.Short, true, 100, 'Например: Killa_Famq'),
-      createTextInputRow(FORM_IDS.roleStatic, 'Статик / ID', TextInputStyle.Short, true, 100, 'Например: 12345'),
-      createTextInputRow(FORM_IDS.roleScreenshot, 'Скрин F2 - Персонаж', TextInputStyle.Paragraph, true, 500, 'Вставь ссылку на скриншот'),
-    );
+export function buildMembershipRequestButtonRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(FORM_IDS.membershipFamilyButton)
+      .setLabel('Семья')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(FORM_IDS.membershipCorpButton)
+      .setLabel('Корпа')
+      .setStyle(ButtonStyle.Success),
+  );
+}
+
+/**
+ * Builds the membership ticket close button row.
+ * @param {boolean} [disabled=false] - Whether the close button should be disabled.
+ * @returns {ActionRowBuilder<ButtonBuilder>} Membership ticket close button row.
+ * @skill-verified
+ */
+export function buildMembershipTicketCloseButtonRow(disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(FORM_IDS.membershipCloseButton)
+      .setLabel('Закрыть заявку')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(disabled),
+  );
 }
 
 /**
@@ -194,5 +206,31 @@ export function buildPromotionReportModal() {
       createTextInputRow(FORM_IDS.promotionCurrentRank, 'Текущий ранг', TextInputStyle.Short, true, 80, 'Например: 2 | KILLA'),
       createTextInputRow(FORM_IDS.promotionTargetRank, 'Хочу на ранг', TextInputStyle.Short, true, 80, 'Например: 3 | OLD KILLA'),
       createTextInputRow(FORM_IDS.promotionReport, 'Сколько дерева собрал', TextInputStyle.Short, true, 100, 'Например: 1200 дерева'),
+    );
+}
+
+/**
+ * Builds the membership request modal.
+ * @param {'family' | 'corp'} type - Membership request type.
+ * @returns {ModalBuilder} Membership request modal.
+ * @skill-verified
+ */
+export function buildMembershipRequestModal(type) {
+  const isFamily = type === 'family';
+
+  return new ModalBuilder()
+    .setCustomId(isFamily ? FORM_IDS.membershipFamilyModal : FORM_IDS.membershipCorpModal)
+    .setTitle(isFamily ? 'Заявка в семью' : 'Заявка в корпу')
+    .addComponents(
+      createTextInputRow(FORM_IDS.membershipNickname, 'Игровой ник', TextInputStyle.Short, true, 100, 'Например: Гоша Килла'),
+      createTextInputRow(FORM_IDS.membershipCid, 'CID', TextInputStyle.Short, true, 50, 'Например: 122'),
+      createTextInputRow(
+        FORM_IDS.membershipRank,
+        isFamily ? 'Ранг в семье' : 'Ранг в корпе',
+        TextInputStyle.Short,
+        true,
+        100,
+        isFamily ? 'Например: Семья - 2' : 'Например: Корпа - 1',
+      ),
     );
 }

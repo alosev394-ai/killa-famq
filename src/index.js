@@ -12,8 +12,9 @@ import { getRuntimeConfig } from './config.js';
 import {
   FORM_IDS,
   buildInviteRequestModal,
+  buildMembershipRequestModal,
+  buildMembershipTicketCloseButtonRow,
   buildPromotionReportModal,
-  buildRoleRequestModal,
   buildSalesLotModal,
   buildSalesLotStatusButtonRow,
 } from './form-components.js';
@@ -372,29 +373,6 @@ function addScreenshotToEmbed(embed, screenshot) {
 }
 
 /**
- * Builds an embed for a submitted role request.
- * @param {import('discord.js').User} user - User who submitted the form.
- * @param {{ nickname: string, staticId: string, screenshot: string }} data - Submitted role request data.
- * @returns {EmbedBuilder} Role request submission embed.
- * @skill-verified
- */
-function buildRoleSubmissionEmbed(user, data) {
-  const embed = new EmbedBuilder()
-    .setColor(0x111111)
-    .setTitle('🎴 Заявка на получение роли')
-    .setDescription(`<@${user.id}>`)
-    .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ size: 128 }) })
-    .addFields(
-      { name: 'Игровой ник', value: truncateFieldValue(data.nickname, 1024), inline: true },
-      { name: 'Статик / ID', value: truncateFieldValue(data.staticId, 1024), inline: true },
-    )
-    .setFooter({ text: 'KILLA FAMQ • Заявка на роль' })
-    .setTimestamp();
-
-  return addScreenshotToEmbed(embed, data.screenshot);
-}
-
-/**
  * Builds an embed for a submitted sales lot.
  * @param {import('discord.js').User} user - User who submitted the form.
  * @param {{ item: string, price: string, description: string, screenshot: string }} data - Submitted sales data.
@@ -461,6 +439,31 @@ function buildPromotionSubmissionEmbed(user, data) {
       { name: 'Сколько дерева собрал', value: truncateFieldValue(data.wood, 1024) },
     )
     .setFooter({ text: 'KILLA FAMQ • Повышение' })
+    .setTimestamp();
+}
+
+/**
+ * Builds an embed for a submitted membership request.
+ * @param {import('discord.js').User} user - User who submitted the form.
+ * @param {{ type: 'family' | 'corp', nickname: string, cid: string, rank: string }} data - Submitted membership request data.
+ * @returns {EmbedBuilder} Membership request embed.
+ * @skill-verified
+ */
+function buildMembershipSubmissionEmbed(user, data) {
+  const typeLabel = formatMembershipType(data.type);
+
+  return new EmbedBuilder()
+    .setColor(data.type === 'family' ? BRAND.quiet : BRAND.ok)
+    .setTitle(data.type === 'family' ? '🟣 Заявка в семью' : '🏢 Заявка в корпу')
+    .setDescription(`<@${user.id}>`)
+    .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ size: 128 }) })
+    .addFields(
+      { name: 'Игровой ник', value: truncateFieldValue(data.nickname, 1024), inline: true },
+      { name: 'CID', value: truncateFieldValue(data.cid, 1024), inline: true },
+      { name: 'Куда', value: typeLabel, inline: true },
+      { name: 'Ранг', value: truncateFieldValue(data.rank, 1024), inline: true },
+    )
+    .setFooter({ text: `KILLA FAMQ • ${typeLabel}` })
     .setTimestamp();
 }
 
@@ -614,6 +617,396 @@ function formatSalesStatus(status) {
 }
 
 /**
+ * Formats a membership request type.
+ * @param {'family' | 'corp'} type - Membership request type.
+ * @returns {string} Human-readable request type.
+ * @skill-verified
+ */
+function formatMembershipType(type) {
+  return type === 'family' ? 'Семья' : 'Корпа';
+}
+
+/**
+ * Returns a membership type from a request button custom ID.
+ * @param {string} customId - Button custom ID.
+ * @returns {'family' | 'corp' | null} Membership type or null.
+ * @skill-verified
+ */
+function getMembershipTypeFromButtonId(customId) {
+  if (customId === FORM_IDS.membershipFamilyButton) {
+    return 'family';
+  }
+
+  if (customId === FORM_IDS.membershipCorpButton) {
+    return 'corp';
+  }
+
+  return null;
+}
+
+/**
+ * Returns a membership type from a modal custom ID.
+ * @param {string} customId - Modal custom ID.
+ * @returns {'family' | 'corp' | null} Membership type or null.
+ * @skill-verified
+ */
+function getMembershipTypeFromModalId(customId) {
+  if (customId === FORM_IDS.membershipFamilyModal) {
+    return 'family';
+  }
+
+  if (customId === FORM_IDS.membershipCorpModal) {
+    return 'corp';
+  }
+
+  return null;
+}
+
+/**
+ * Normalizes Discord object names for fuzzy matching.
+ * @param {string} value - Raw name.
+ * @returns {string} Normalized name.
+ * @skill-verified
+ */
+function normalizeDiscordName(value) {
+  return value
+    .toLowerCase()
+    .normalize('NFKC')
+    .replace(/ё/g, 'е')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '');
+}
+
+/**
+ * Checks whether a role looks like a leader or deputy leader role.
+ * @param {import('discord.js').Role} role - Discord role.
+ * @returns {boolean} True when the role should see membership tickets.
+ * @skill-verified
+ */
+function isLeadershipRole(role) {
+  const name = normalizeDiscordName(role.name);
+  return name.includes('leader')
+    || name.includes('lider')
+    || name.includes('лидер')
+    || name.includes('deplider')
+    || name.includes('depleader')
+    || name.includes('деплидер');
+}
+
+/**
+ * Finds leader and deputy leader roles in a guild.
+ * @param {import('discord.js').Guild} guild - Guild to inspect.
+ * @returns {Promise<import('discord.js').Role[]>} Matching leadership roles.
+ * @skill-verified
+ */
+async function findLeadershipRoles(guild) {
+  const roles = await guild.roles.fetch();
+  return [...roles.values()].filter((role) => !role.managed && isLeadershipRole(role));
+}
+
+/**
+ * Builds a safe text-channel name part.
+ * @param {string} value - Raw user supplied name.
+ * @returns {string} Safe channel name part.
+ * @skill-verified
+ */
+function buildSafeChannelNamePart(value) {
+  const cleanValue = value
+    .toLowerCase()
+    .normalize('NFKC')
+    .replace(/ё/g, 'е')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42);
+
+  return cleanValue || 'игрок';
+}
+
+/**
+ * Builds a membership ticket channel name.
+ * @param {'family' | 'corp'} type - Membership request type.
+ * @param {string} nickname - Submitted game nickname.
+ * @returns {string} Ticket channel name.
+ * @skill-verified
+ */
+function buildMembershipTicketChannelName(type, nickname) {
+  const typePart = type === 'family' ? 'семья' : 'корпа';
+  return `заявка-${typePart}-${buildSafeChannelNamePart(nickname)}`.slice(0, 100);
+}
+
+/**
+ * Builds an archived membership ticket channel name.
+ * @param {string} channelName - Current channel name.
+ * @returns {string} Archived channel name.
+ * @skill-verified
+ */
+function buildArchivedTicketChannelName(channelName) {
+  if (normalizeDiscordName(channelName).startsWith('архив')) {
+    return channelName;
+  }
+
+  return `архив-${channelName}`.slice(0, 100);
+}
+
+/**
+ * Checks whether a category is the archive category.
+ * @param {import('discord.js').GuildBasedChannel | null} channel - Channel to inspect.
+ * @returns {boolean} True when the channel is an archive category.
+ * @skill-verified
+ */
+function isArchiveCategory(channel) {
+  if (!channel || channel.type !== ChannelType.GuildCategory) {
+    return false;
+  }
+
+  const name = normalizeDiscordName(channel.name);
+  return name.includes('архив') || name.includes('archive');
+}
+
+/**
+ * Finds the archive category in a guild.
+ * @param {import('discord.js').Guild} guild - Guild to search.
+ * @returns {Promise<import('discord.js').CategoryChannel | null>} Archive category or null.
+ * @skill-verified
+ */
+async function findArchiveCategory(guild) {
+  await guild.channels.fetch();
+
+  for (const [, channel] of guild.channels.cache) {
+    if (isArchiveCategory(channel)) {
+      return channel;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns the open ticket parent category ID.
+ * @param {import('discord.js').GuildTextBasedChannel | null} sourceChannel - Channel where the form was submitted.
+ * @returns {string | null} Parent category ID or null.
+ * @skill-verified
+ */
+function getOpenTicketParentId(sourceChannel) {
+  if (!sourceChannel || !('parent' in sourceChannel) || !sourceChannel.parent || isArchiveCategory(sourceChannel.parent)) {
+    return null;
+  }
+
+  return sourceChannel.parent.id;
+}
+
+/**
+ * Builds permission overwrites for an open membership ticket.
+ * @param {import('discord.js').Guild} guild - Guild that owns the ticket.
+ * @param {string} applicantId - Discord user ID of the applicant.
+ * @param {import('discord.js').Role[]} leadershipRoles - Roles that should see the ticket.
+ * @returns {Promise<Array<Record<string, unknown>>>} Permission overwrite payloads.
+ * @skill-verified
+ */
+async function buildMembershipTicketOverwrites(guild, applicantId, leadershipRoles) {
+  return buildMembershipAccessOverwrites(guild, leadershipRoles, applicantId);
+}
+
+/**
+ * Builds permission overwrites for an archived membership ticket.
+ * @param {import('discord.js').Guild} guild - Guild that owns the ticket.
+ * @param {import('discord.js').Role[]} leadershipRoles - Roles that should see the archived ticket.
+ * @returns {Promise<Array<Record<string, unknown>>>} Permission overwrite payloads.
+ * @skill-verified
+ */
+async function buildArchivedMembershipTicketOverwrites(guild, leadershipRoles) {
+  return buildMembershipAccessOverwrites(guild, leadershipRoles, null);
+}
+
+/**
+ * Builds permission overwrites for ticket visibility.
+ * @param {import('discord.js').Guild} guild - Guild that owns the ticket.
+ * @param {import('discord.js').Role[]} leadershipRoles - Roles that should see the ticket.
+ * @param {string | null} applicantId - Discord user ID of the applicant, if the applicant should still see the ticket.
+ * @returns {Promise<Array<Record<string, unknown>>>} Permission overwrite payloads.
+ * @skill-verified
+ */
+async function buildMembershipAccessOverwrites(guild, leadershipRoles, applicantId) {
+  const overwrites = new Map();
+  const me = guild.members.me || await guild.members.fetchMe();
+  const viewPermissions = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.EmbedLinks,
+  ];
+
+  overwrites.set(guild.roles.everyone.id, { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] });
+  overwrites.set(me.id, { id: me.id, allow: [...viewPermissions, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages] });
+  overwrites.set(guild.ownerId, { id: guild.ownerId, allow: viewPermissions });
+
+  if (applicantId) {
+    overwrites.set(applicantId, { id: applicantId, allow: viewPermissions });
+  }
+
+  for (const role of leadershipRoles) {
+    overwrites.set(role.id, { id: role.id, allow: viewPermissions });
+  }
+
+  return [...overwrites.values()];
+}
+
+/**
+ * Builds the ticket message content with mentions.
+ * @param {import('discord.js').User} applicant - Applicant user.
+ * @param {import('discord.js').Guild} guild - Guild that owns the ticket.
+ * @param {import('discord.js').Role[]} leadershipRoles - Roles to mention.
+ * @returns {string} Ticket message content.
+ * @skill-verified
+ */
+function buildMembershipTicketContent(applicant, guild, leadershipRoles) {
+  const roleMentions = leadershipRoles.map((role) => `<@&${role.id}>`).join(' ');
+  return [`<@${applicant.id}>`, `<@${guild.ownerId}>`, roleMentions].filter(Boolean).join(' ');
+}
+
+/**
+ * Builds allowed mentions for a ticket message.
+ * @param {import('discord.js').User} applicant - Applicant user.
+ * @param {import('discord.js').Guild} guild - Guild that owns the ticket.
+ * @param {import('discord.js').Role[]} leadershipRoles - Roles to allow mentioning.
+ * @returns {{ users: string[], roles: string[] }} Allowed mention IDs.
+ * @skill-verified
+ */
+function buildMembershipTicketAllowedMentions(applicant, guild, leadershipRoles) {
+  return {
+    users: [applicant.id, guild.ownerId],
+    roles: leadershipRoles.map((role) => role.id),
+  };
+}
+
+/**
+ * Creates a private membership ticket channel.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @param {{ type: 'family' | 'corp', nickname: string, cid: string, rank: string }} data - Membership request data.
+ * @returns {Promise<import('discord.js').TextChannel>} Created ticket channel.
+ * @skill-verified
+ */
+async function createMembershipTicket(interaction, data) {
+  const guild = interaction.guild;
+  const leadershipRoles = await findLeadershipRoles(guild);
+  const parentId = getOpenTicketParentId(interaction.channel);
+  const createOptions = {
+    name: buildMembershipTicketChannelName(data.type, data.nickname),
+    type: ChannelType.GuildText,
+    permissionOverwrites: await buildMembershipTicketOverwrites(guild, interaction.user.id, leadershipRoles),
+    reason: `Заявка ${formatMembershipType(data.type)} от ${interaction.user.tag}`,
+  };
+
+  if (parentId) {
+    createOptions.parent = parentId;
+  }
+
+  const ticketChannel = await guild.channels.create(createOptions);
+
+  await ticketChannel.send({
+    content: buildMembershipTicketContent(interaction.user, guild, leadershipRoles),
+    embeds: [buildMembershipSubmissionEmbed(interaction.user, data)],
+    components: [buildMembershipTicketCloseButtonRow()],
+    allowedMentions: buildMembershipTicketAllowedMentions(interaction.user, guild, leadershipRoles),
+  });
+
+  return ticketChannel;
+}
+
+/**
+ * Checks whether a member has any of the provided roles.
+ * @param {import('discord.js').GuildMember | import('discord.js').APIInteractionGuildMember | null} member - Member to inspect.
+ * @param {string[]} roleIds - Role IDs to check.
+ * @returns {boolean} True when the member has at least one role.
+ * @skill-verified
+ */
+function memberHasAnyRole(member, roleIds) {
+  if (!member || roleIds.length === 0 || !('roles' in member)) {
+    return false;
+  }
+
+  if (Array.isArray(member.roles)) {
+    return roleIds.some((roleId) => member.roles.includes(roleId));
+  }
+
+  return roleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
+/**
+ * Checks whether a user may close a membership ticket.
+ * @param {import('discord.js').ButtonInteraction} interaction - Button interaction.
+ * @param {import('discord.js').Role[]} leadershipRoles - Roles allowed to close tickets.
+ * @returns {boolean} True when the user may close the ticket.
+ * @skill-verified
+ */
+function canCloseMembershipTicket(interaction, leadershipRoles) {
+  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+    return true;
+  }
+
+  return memberHasAnyRole(interaction.member, leadershipRoles.map((role) => role.id));
+}
+
+/**
+ * Archives a membership ticket channel.
+ * @param {import('discord.js').TextChannel} channel - Ticket channel to archive.
+ * @param {import('discord.js').CategoryChannel} archiveCategory - Archive category.
+ * @param {import('discord.js').Role[]} leadershipRoles - Roles that should keep access.
+ * @param {import('discord.js').User} actor - User who closed the ticket.
+ * @returns {Promise<void>} Resolves after the ticket is archived.
+ * @skill-verified
+ */
+async function archiveMembershipTicket(channel, archiveCategory, leadershipRoles, actor) {
+  const reason = `Заявку закрыл ${actor.tag}`;
+
+  await channel.setParent(archiveCategory.id, { lockPermissions: false, reason });
+  await channel.permissionOverwrites.set(await buildArchivedMembershipTicketOverwrites(channel.guild, leadershipRoles), reason);
+
+  const archivedName = buildArchivedTicketChannelName(channel.name);
+
+  if (archivedName !== channel.name) {
+    await channel.setName(archivedName, reason);
+  }
+}
+
+/**
+ * Handles membership ticket close buttons.
+ * @param {import('discord.js').ButtonInteraction} interaction - Button interaction.
+ * @returns {Promise<boolean>} True when the button was handled.
+ * @skill-verified
+ */
+async function handleMembershipTicketCloseButton(interaction) {
+  if (interaction.customId !== FORM_IDS.membershipCloseButton) {
+    return false;
+  }
+
+  if (!interaction.inGuild() || !interaction.channel || interaction.channel.type !== ChannelType.GuildText) {
+    await interaction.reply({ content: 'Эту заявку нельзя закрыть здесь.', flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  const leadershipRoles = await findLeadershipRoles(interaction.guild);
+
+  if (!canCloseMembershipTicket(interaction, leadershipRoles)) {
+    await interaction.reply({ content: 'Закрывать заявку может лидер, деп-лидер или админ.', flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  const archiveCategory = await findArchiveCategory(interaction.guild);
+
+  if (!archiveCategory) {
+    await interaction.reply({ content: 'Не нашел категорию архива. Создай категорию с названием `архив` и нажми кнопку снова.', flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await archiveMembershipTicket(interaction.channel, archiveCategory, leadershipRoles, interaction.user);
+  await interaction.message.edit({ components: [buildMembershipTicketCloseButtonRow(true)] });
+  await interaction.editReply(`Заявка закрыта и перенесена в категорию ${archiveCategory}.`);
+  return true;
+}
+
+/**
  * Handles interactive form buttons.
  * @param {import('discord.js').ButtonInteraction} interaction - Button interaction.
  * @returns {Promise<boolean>} True when the button was handled.
@@ -624,8 +1017,7 @@ async function handleFormButton(interaction) {
     return true;
   }
 
-  if (interaction.customId === FORM_IDS.roleButton) {
-    await interaction.showModal(buildRoleRequestModal());
+  if (await handleMembershipTicketCloseButton(interaction)) {
     return true;
   }
 
@@ -644,23 +1036,14 @@ async function handleFormButton(interaction) {
     return true;
   }
 
+  const membershipType = getMembershipTypeFromButtonId(interaction.customId);
+
+  if (membershipType) {
+    await interaction.showModal(buildMembershipRequestModal(membershipType));
+    return true;
+  }
+
   return false;
-}
-
-/**
- * Handles role request modal submissions.
- * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
- * @returns {Promise<void>} Resolves after the role request is handled.
- * @skill-verified
- */
-async function handleRoleRequestModal(interaction) {
-  const embed = buildRoleSubmissionEmbed(interaction.user, {
-    nickname: getModalTextValue(interaction, FORM_IDS.roleNickname),
-    staticId: getModalTextValue(interaction, FORM_IDS.roleStatic),
-    screenshot: getModalTextValue(interaction, FORM_IDS.roleScreenshot),
-  });
-
-  await sendSubmissionEmbed(interaction, embed);
 }
 
 /**
@@ -714,17 +1097,32 @@ async function handlePromotionReportModal(interaction) {
 }
 
 /**
+ * Handles membership request modal submissions.
+ * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
+ * @param {'family' | 'corp'} type - Membership request type.
+ * @returns {Promise<void>} Resolves after the ticket is created.
+ * @skill-verified
+ */
+async function handleMembershipRequestModal(interaction, type) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const ticketChannel = await createMembershipTicket(interaction, {
+    type,
+    nickname: getModalTextValue(interaction, FORM_IDS.membershipNickname),
+    cid: getModalTextValue(interaction, FORM_IDS.membershipCid),
+    rank: getModalTextValue(interaction, FORM_IDS.membershipRank),
+  });
+
+  await interaction.editReply(`Заявка создана: ${ticketChannel}`);
+}
+
+/**
  * Handles interactive modal submissions.
  * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
  * @returns {Promise<boolean>} True when the modal was handled.
  * @skill-verified
  */
 async function handleFormModal(interaction) {
-  if (interaction.customId === FORM_IDS.roleModal) {
-    await handleRoleRequestModal(interaction);
-    return true;
-  }
-
   if (interaction.customId === FORM_IDS.salesModal) {
     await handleSalesLotModal(interaction);
     return true;
@@ -737,6 +1135,13 @@ async function handleFormModal(interaction) {
 
   if (interaction.customId === FORM_IDS.promotionModal) {
     await handlePromotionReportModal(interaction);
+    return true;
+  }
+
+  const membershipType = getMembershipTypeFromModalId(interaction.customId);
+
+  if (membershipType) {
+    await handleMembershipRequestModal(interaction, membershipType);
     return true;
   }
 
