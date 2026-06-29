@@ -33,7 +33,7 @@ export const FORM_IDS = Object.freeze({
   membershipCorpModal: 'killa_membership_corp_submit',
   membershipNickname: 'membership_nickname',
   membershipCid: 'membership_cid',
-  membershipRank: 'membership_rank',
+  membershipReason: 'membership_reason',
   membershipCloseButton: 'killa_membership_ticket_close',
 });
 
@@ -225,12 +225,12 @@ export function buildMembershipRequestModal(type) {
       createTextInputRow(FORM_IDS.membershipNickname, 'Игровой ник', TextInputStyle.Short, true, 100, 'Например: Гоша Килла'),
       createTextInputRow(FORM_IDS.membershipCid, 'CID', TextInputStyle.Short, true, 50, 'Например: 122'),
       createTextInputRow(
-        FORM_IDS.membershipRank,
-        isFamily ? 'Ранг в семье' : 'Ранг в корпе',
-        TextInputStyle.Short,
+        FORM_IDS.membershipReason,
+        'Почему хотите вступить к нам',
+        TextInputStyle.Paragraph,
         true,
-        100,
-        isFamily ? 'Например: Семья - 2' : 'Например: Корпа - 1',
+        500,
+        'Например: хочу быть в активном составе и помогать корпе',
       ),
     );
 }

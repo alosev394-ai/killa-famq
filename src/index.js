@@ -445,7 +445,7 @@ function buildPromotionSubmissionEmbed(user, data) {
 /**
  * Builds an embed for a submitted membership request.
  * @param {import('discord.js').User} user - User who submitted the form.
- * @param {{ type: 'family' | 'corp', nickname: string, cid: string, rank: string }} data - Submitted membership request data.
+ * @param {{ type: 'family' | 'corp', nickname: string, cid: string, reason: string }} data - Submitted membership request data.
  * @returns {EmbedBuilder} Membership request embed.
  * @skill-verified
  */
@@ -461,7 +461,7 @@ function buildMembershipSubmissionEmbed(user, data) {
       { name: 'Игровой ник', value: truncateFieldValue(data.nickname, 1024), inline: true },
       { name: 'CID', value: truncateFieldValue(data.cid, 1024), inline: true },
       { name: 'Куда', value: typeLabel, inline: true },
-      { name: 'Ранг', value: truncateFieldValue(data.rank, 1024), inline: true },
+      { name: 'Почему хотите вступить к нам', value: truncateFieldValue(data.reason, 1024) },
     )
     .setFooter({ text: `KILLA FAMQ • ${typeLabel}` })
     .setTimestamp();
@@ -882,7 +882,7 @@ function buildMembershipTicketAllowedMentions(applicant, guild, leadershipRoles)
 /**
  * Creates a private membership ticket channel.
  * @param {import('discord.js').ModalSubmitInteraction} interaction - Modal submit interaction.
- * @param {{ type: 'family' | 'corp', nickname: string, cid: string, rank: string }} data - Membership request data.
+ * @param {{ type: 'family' | 'corp', nickname: string, cid: string, reason: string }} data - Membership request data.
  * @returns {Promise<import('discord.js').TextChannel>} Created ticket channel.
  * @skill-verified
  */
@@ -1110,7 +1110,7 @@ async function handleMembershipRequestModal(interaction, type) {
     type,
     nickname: getModalTextValue(interaction, FORM_IDS.membershipNickname),
     cid: getModalTextValue(interaction, FORM_IDS.membershipCid),
-    rank: getModalTextValue(interaction, FORM_IDS.membershipRank),
+    reason: getModalTextValue(interaction, FORM_IDS.membershipReason),
   });
 
   await interaction.editReply(`Заявка создана: ${ticketChannel}`);
