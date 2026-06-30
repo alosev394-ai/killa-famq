@@ -7,7 +7,7 @@ let stateQueue = Promise.resolve();
 
 /**
  * Creates an empty persisted bot state object.
- * @returns {{ guilds: Record<string, { rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }} Empty state.
+ * @returns {{ guilds: Record<string, { rules: string[], warnings: Record<string, Array<Record<string, string>>>, giveaways: Record<string, Record<string, unknown>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }} Empty state.
  * @skill-verified
  */
 function createEmptyState() {
@@ -16,9 +16,9 @@ function createEmptyState() {
 
 /**
  * Ensures a guild has a state bucket.
- * @param {{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }} state - Full bot state.
+ * @param {{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>>, giveaways?: Record<string, Record<string, unknown>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }} state - Full bot state.
  * @param {string} guildId - Discord guild ID.
- * @returns {{ rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }} Guild state bucket.
+ * @returns {{ rules: string[], warnings: Record<string, Array<Record<string, string>>>, giveaways: Record<string, Record<string, unknown>>, priceList?: Record<string, unknown>, priceMessageId?: string }} Guild state bucket.
  * @skill-verified
  */
 function ensureGuildState(state, guildId) {
@@ -29,13 +29,14 @@ function ensureGuildState(state, guildId) {
   const guildState = state.guilds[guildId];
   guildState.rules = Array.isArray(guildState.rules) ? guildState.rules : [];
   guildState.warnings = guildState.warnings && typeof guildState.warnings === 'object' ? guildState.warnings : {};
+  guildState.giveaways = guildState.giveaways && typeof guildState.giveaways === 'object' ? guildState.giveaways : {};
 
   return guildState;
 }
 
 /**
  * Loads the full bot state from disk.
- * @returns {Promise<{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }>} Full bot state.
+ * @returns {Promise<{ guilds: Record<string, { rules?: string[], warnings?: Record<string, Array<Record<string, string>>>, giveaways?: Record<string, Record<string, unknown>>, priceList?: Record<string, unknown>, priceMessageId?: string }> }>} Full bot state.
  * @skill-verified
  */
 async function loadState() {
@@ -72,7 +73,7 @@ async function saveState(state) {
  * Runs a serialized update against one guild bucket and persists it.
  * @template T
  * @param {string} guildId - Discord guild ID.
- * @param {(guildState: { rules: string[], warnings: Record<string, Array<Record<string, string>>>, priceList?: Record<string, unknown>, priceMessageId?: string }) => T} updater - State updater.
+ * @param {(guildState: { rules: string[], warnings: Record<string, Array<Record<string, string>>>, giveaways: Record<string, Record<string, unknown>>, priceList?: Record<string, unknown>, priceMessageId?: string }) => T} updater - State updater.
  * @returns {Promise<T>} The updater result.
  * @skill-verified
  */
@@ -307,6 +308,18 @@ export function updateGuildPriceList(guildId, updater) {
   }
 
   return updateGuildState(guildId, updatePriceList);
+}
+
+/**
+ * Returns saved giveaways for a guild.
+ * @param {string} guildId - Discord guild ID.
+ * @returns {Promise<Record<string, Record<string, unknown>>>} Saved giveaways keyed by giveaway ID.
+ * @skill-verified
+ */
+export async function getGuildGiveaways(guildId) {
+  const state = await loadState();
+  const guildState = ensureGuildState(state, guildId);
+  return structuredClone(guildState.giveaways);
 }
 
 /**

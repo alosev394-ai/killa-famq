@@ -42,6 +42,12 @@ export const COMMAND_GROUPS = [
     ],
   },
   {
+    name: 'Розыгрыши',
+    commands: [
+      ['розыгрыш', 'создать розыгрыш с кнопкой участия'],
+    ],
+  },
+  {
     name: 'Расценки',
     commands: [
       ['прайс', 'показать актуальные расценки'],
@@ -391,6 +397,60 @@ const COMMAND_DEFINITIONS = [
         type: ApplicationCommandOptionType.Channel,
         name: 'канал',
         description: 'Куда отправить опрос. Если не выбрать, будет текущий канал.',
+        required: false,
+        channel_types: [ChannelType.GuildText, ChannelType.GuildAnnouncement],
+      },
+    ],
+  },
+  {
+    name: 'розыгрыш',
+    description: 'Создает розыгрыш с кнопкой участия в giveaway-канале.',
+    dm_permission: false,
+    default_member_permissions: permissionValue(PermissionFlagsBits.ManageGuild),
+    options: [
+      {
+        type: ApplicationCommandOptionType.String,
+        name: 'приз',
+        description: 'Что разыгрывается.',
+        required: true,
+        max_length: 200,
+      },
+      {
+        type: ApplicationCommandOptionType.Integer,
+        name: 'победителей',
+        description: 'Сколько победителей выбрать.',
+        required: true,
+        min_value: 1,
+        max_value: 20,
+      },
+      {
+        type: ApplicationCommandOptionType.Integer,
+        name: 'часы',
+        description: 'Через сколько часов завершить розыгрыш.',
+        required: false,
+        min_value: 0,
+        max_value: 720,
+      },
+      {
+        type: ApplicationCommandOptionType.Integer,
+        name: 'минуты',
+        description: 'Через сколько минут завершить розыгрыш.',
+        required: false,
+        min_value: 0,
+        max_value: 59,
+      },
+      {
+        type: ApplicationCommandOptionType.Integer,
+        name: 'секунды',
+        description: 'Через сколько секунд завершить розыгрыш.',
+        required: false,
+        min_value: 0,
+        max_value: 59,
+      },
+      {
+        type: ApplicationCommandOptionType.Channel,
+        name: 'канал',
+        description: 'Канал розыгрыша. Если не выбрать, бот найдет giveaway сам.',
         required: false,
         channel_types: [ChannelType.GuildText, ChannelType.GuildAnnouncement],
       },

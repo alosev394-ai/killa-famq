@@ -28,6 +28,16 @@ import {
   updateGuildPriceItem,
 } from './price-list.js';
 import {
+  addGiveawayParticipant,
+  buildGiveawayButtonRow,
+  buildGiveawayEmbed,
+  createGiveawayDraft,
+  finishGuildGiveaway,
+  getActiveGiveaways,
+  getGiveawayIdFromCustomId,
+  saveGuildGiveaway,
+} from './giveaways.js';
+import {
   addGuildRule,
   addWarning,
   clearGuildRules,
@@ -47,6 +57,8 @@ const BRAND = {
 };
 
 const POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+const GIVEAWAY_TIMERS = new Map();
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
  * Creates a branded embed used by the bot.
@@ -1024,6 +1036,10 @@ async function handleMembershipTicketCloseButton(interaction) {
  * @skill-verified
  */
 async function handleFormButton(interaction) {
+  if (await handleGiveawayJoinButton(interaction)) {
+    return true;
+  }
+
   if (await handleSalesStatusButton(interaction)) {
     return true;
   }
@@ -1592,6 +1608,347 @@ async function handlePoll(interaction) {
 }
 
 /**
+ * Builds a stable timer map key for a giveaway.
+ * @param {Record<string, unknown>} giveaway - Giveaway record.
+ * @returns {string} Timer map key.
+ * @skill-verified
+ */
+function getGiveawayTimerKey(giveaway) {
+  return `${giveaway.guildId}:${giveaway.id}`;
+}
+
+/**
+ * Reads giveaway duration options from a slash command.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {number} Duration in milliseconds.
+ * @skill-verified
+ */
+function getGiveawayDurationMs(interaction) {
+  const hours = interaction.options.getInteger('часы') ?? 0;
+  const minutes = interaction.options.getInteger('минуты') ?? 0;
+  const seconds = interaction.options.getInteger('секунды') ?? 0;
+  return ((hours * 60 * 60) + (minutes * 60) + seconds) * 1000;
+}
+
+/**
+ * Formats a giveaway duration for a private admin confirmation.
+ * @param {number} durationMs - Duration in milliseconds.
+ * @returns {string} Human readable duration.
+ * @skill-verified
+ */
+function formatGiveawayDuration(durationMs) {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+
+  if (hours > 0) {
+    parts.push(`${hours} ч.`);
+  }
+
+  if (minutes > 0) {
+    parts.push(`${minutes} мин.`);
+  }
+
+  if (seconds > 0) {
+    parts.push(`${seconds} сек.`);
+  }
+
+  return parts.join(' ') || '0 сек.';
+}
+
+/**
+ * Checks whether a channel looks like the giveaway channel.
+ * @param {import('discord.js').GuildBasedChannel | null} channel - Channel to inspect.
+ * @returns {boolean} True when this is a giveaway text channel.
+ * @skill-verified
+ */
+function isGiveawayChannel(channel) {
+  if (!channel || !channel.isTextBased() || channel.type === ChannelType.DM || !('send' in channel)) {
+    return false;
+  }
+
+  const name = normalizeDiscordName(channel.name);
+  return name.includes('giveaway') || name.includes('розыгрыш') || name.includes('розыгрыши');
+}
+
+/**
+ * Finds the default giveaway channel in a guild.
+ * @param {import('discord.js').Guild} guild - Guild to search.
+ * @returns {Promise<import('discord.js').GuildTextBasedChannel | null>} Giveaway channel or null.
+ * @skill-verified
+ */
+async function findGiveawayChannel(guild) {
+  await guild.channels.fetch();
+
+  for (const [, channel] of guild.channels.cache) {
+    if (isGiveawayChannel(channel)) {
+      return channel;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns a selected giveaway channel or the default giveaway channel.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<import('discord.js').GuildTextBasedChannel | null>} Giveaway target channel or null.
+ * @skill-verified
+ */
+async function getGiveawayTargetChannel(interaction) {
+  const selectedChannel = interaction.options.getChannel('канал');
+
+  if (selectedChannel) {
+    return isGiveawayChannel(selectedChannel) || (selectedChannel.isTextBased() && selectedChannel.type !== ChannelType.DM && 'send' in selectedChannel)
+      ? selectedChannel
+      : null;
+  }
+
+  return findGiveawayChannel(interaction.guild);
+}
+
+/**
+ * Checks whether the bot can publish a giveaway in a channel.
+ * @param {import('discord.js').GuildTextBasedChannel} channel - Target giveaway channel.
+ * @param {import('discord.js').GuildMember} botMember - Bot guild member.
+ * @returns {boolean} True when the bot has enough channel permissions.
+ * @skill-verified
+ */
+function canPublishGiveaway(channel, botMember) {
+  const permissions = channel.permissionsFor(botMember);
+  return Boolean(permissions?.has(PermissionFlagsBits.ViewChannel)
+    && permissions.has(PermissionFlagsBits.SendMessages)
+    && permissions.has(PermissionFlagsBits.EmbedLinks));
+}
+
+/**
+ * Edits the original giveaway message.
+ * @param {import('discord.js').Client} client - Discord client.
+ * @param {Record<string, unknown>} giveaway - Giveaway record.
+ * @returns {Promise<void>} Resolves after the message is edited or skipped.
+ * @skill-verified
+ */
+async function editGiveawayMessage(client, giveaway) {
+  try {
+    const channel = await client.channels.fetch(giveaway.channelId);
+
+    if (!channel || !('messages' in channel)) {
+      return;
+    }
+
+    const message = await channel.messages.fetch(giveaway.messageId);
+    await message.edit({ embeds: [buildGiveawayEmbed(giveaway)], components: [buildGiveawayButtonRow(giveaway)] });
+  } catch (error) {
+    console.warn(`Не получилось обновить сообщение розыгрыша ${giveaway.id}:`, error.message);
+  }
+}
+
+/**
+ * Sends the public giveaway result message.
+ * @param {import('discord.js').Client} client - Discord client.
+ * @param {Record<string, unknown>} giveaway - Finished giveaway record.
+ * @returns {Promise<void>} Resolves after the result is sent.
+ * @skill-verified
+ */
+async function announceGiveawayWinners(client, giveaway) {
+  if (giveaway.announcementMessageId) {
+    return;
+  }
+
+  const channel = await client.channels.fetch(giveaway.channelId);
+
+  if (!channel || !('send' in channel)) {
+    return;
+  }
+
+  const winnerIds = Array.isArray(giveaway.winnerIds) ? giveaway.winnerIds : [];
+  const content = winnerIds.length === 0
+    ? `🎉 Розыгрыш на **${giveaway.prize}** завершён, но участников не было.`
+    : [`🎉 Победители розыгрыша на **${giveaway.prize}**:`, ...winnerIds.map((winnerId) => `<@${winnerId}>`)].join('\n');
+  const message = await channel.send({
+    content,
+    allowedMentions: { parse: [], users: winnerIds },
+  });
+
+  await saveGuildGiveaway(giveaway.guildId, { ...giveaway, announcementMessageId: message.id });
+}
+
+/**
+ * Finishes one giveaway and announces winners.
+ * @param {import('discord.js').Client} client - Discord client.
+ * @param {string} guildId - Discord guild ID.
+ * @param {string} giveawayId - Giveaway ID.
+ * @returns {Promise<void>} Resolves after the giveaway is finished.
+ * @skill-verified
+ */
+async function finishAndAnnounceGiveaway(client, guildId, giveawayId) {
+  const giveaway = await finishGuildGiveaway(guildId, giveawayId);
+
+  if (!giveaway) {
+    return;
+  }
+
+  const timerKey = getGiveawayTimerKey(giveaway);
+  const timer = GIVEAWAY_TIMERS.get(timerKey);
+
+  if (timer) {
+    clearTimeout(timer);
+    GIVEAWAY_TIMERS.delete(timerKey);
+  }
+
+  await editGiveawayMessage(client, giveaway);
+  await announceGiveawayWinners(client, giveaway);
+}
+
+/**
+ * Schedules giveaway completion.
+ * @param {import('discord.js').Client} client - Discord client.
+ * @param {Record<string, unknown>} giveaway - Giveaway record.
+ * @returns {void} No return value.
+ * @skill-verified
+ */
+function scheduleGiveawayEnd(client, giveaway) {
+  const timerKey = getGiveawayTimerKey(giveaway);
+  const oldTimer = GIVEAWAY_TIMERS.get(timerKey);
+
+  if (oldTimer) {
+    clearTimeout(oldTimer);
+  }
+
+  const remainingMs = Date.parse(giveaway.endsAt) - Date.now();
+
+  if (remainingMs <= 0) {
+    void finishAndAnnounceGiveaway(client, giveaway.guildId, giveaway.id);
+    return;
+  }
+
+  const timeoutMs = Math.min(remainingMs, MAX_TIMEOUT_MS);
+  const timer = setTimeout(() => {
+    if (remainingMs > MAX_TIMEOUT_MS) {
+      scheduleGiveawayEnd(client, giveaway);
+      return;
+    }
+
+    void finishAndAnnounceGiveaway(client, giveaway.guildId, giveaway.id);
+  }, timeoutMs);
+
+  GIVEAWAY_TIMERS.set(timerKey, timer);
+}
+
+/**
+ * Restores active giveaway timers after bot startup.
+ * @param {import('discord.js').Client} client - Ready Discord client.
+ * @returns {Promise<void>} Resolves after active giveaways are scheduled.
+ * @skill-verified
+ */
+async function scheduleActiveGiveaways(client) {
+  for (const [, guild] of client.guilds.cache) {
+    const giveaways = await getActiveGiveaways(guild.id);
+
+    for (const giveaway of giveaways) {
+      scheduleGiveawayEnd(client, giveaway);
+    }
+  }
+}
+
+/**
+ * Handles clicking a giveaway participation button.
+ * @param {import('discord.js').ButtonInteraction} interaction - Button interaction.
+ * @returns {Promise<boolean>} True when the button was handled.
+ * @skill-verified
+ */
+async function handleGiveawayJoinButton(interaction) {
+  const giveawayId = getGiveawayIdFromCustomId(interaction.customId);
+
+  if (!giveawayId) {
+    return false;
+  }
+
+  if (!interaction.inGuild()) {
+    await interaction.reply({ content: 'Розыгрыши работают только на сервере.', flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const result = await addGiveawayParticipant(interaction.guildId, giveawayId, interaction.user.id);
+
+  if (result.status === 'missing') {
+    await interaction.editReply('Розыгрыш не найден или уже завершён.');
+    return true;
+  }
+
+  if (result.status === 'expired') {
+    await finishAndAnnounceGiveaway(interaction.client, interaction.guildId, giveawayId);
+    await interaction.editReply('Розыгрыш уже завершился.');
+    return true;
+  }
+
+  if (result.status === 'duplicate') {
+    await interaction.editReply('🎉 Вы уже участвуете.');
+    return true;
+  }
+
+  await editGiveawayMessage(interaction.client, result.giveaway);
+  await interaction.editReply('🎉 Вы участвуете.');
+  return true;
+}
+
+/**
+ * Handles creating a giveaway with /розыгрыш.
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
+ * @returns {Promise<void>} Resolves after the giveaway is created.
+ * @skill-verified
+ */
+async function handleGiveaway(interaction) {
+  if (!(await ensureGuildInteraction(interaction))) {
+    return;
+  }
+
+  const durationMs = getGiveawayDurationMs(interaction);
+
+  if (durationMs <= 0) {
+    await replyPrivate(interaction, 'Укажи хотя бы часы, минуты или секунды для розыгрыша.');
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const channel = await getGiveawayTargetChannel(interaction);
+
+  if (!channel) {
+    await interaction.editReply('Не нашёл канал для розыгрыша. Выбери канал вручную или создай канал с `giveaway` в названии.');
+    return;
+  }
+
+  const botMember = interaction.guild.members.me || (await interaction.guild.members.fetchMe());
+
+  if (!canPublishGiveaway(channel, botMember)) {
+    await interaction.editReply(`Мне не хватает прав писать красивые сообщения в ${channel}. Нужны: видеть канал, отправлять сообщения и встраивать ссылки.`);
+    return;
+  }
+
+  const giveaway = createGiveawayDraft({
+    guildId: interaction.guildId,
+    channelId: channel.id,
+    prize: interaction.options.getString('приз', true).trim(),
+    winnerCount: interaction.options.getInteger('победителей', true),
+    endsAt: new Date(Date.now() + durationMs).toISOString(),
+    createdById: interaction.user.id,
+  });
+  const message = await channel.send({
+    embeds: [buildGiveawayEmbed(giveaway)],
+    components: [buildGiveawayButtonRow(giveaway)],
+    allowedMentions: { parse: [] },
+  });
+  giveaway.messageId = message.id;
+
+  await saveGuildGiveaway(interaction.guildId, giveaway);
+  scheduleGiveawayEnd(interaction.client, giveaway);
+  await interaction.editReply(`Розыгрыш создан в ${channel} на ${formatGiveawayDuration(durationMs)}: ${message.url}`);
+}
+
+/**
  * Returns an optional selected text channel for price publishing.
  * @param {import('discord.js').ChatInputCommandInteraction} interaction - Slash command interaction.
  * @param {string} optionName - Channel option name.
@@ -1810,6 +2167,9 @@ async function dispatchCommand(interaction) {
     case 'опрос':
       await handlePoll(interaction);
       break;
+    case 'розыгрыш':
+      await handleGiveaway(interaction);
+      break;
     case 'прайс':
       await handlePriceList(interaction);
       break;
@@ -1867,6 +2227,7 @@ async function handleReady(client) {
   });
 
   await sendStartupLogs(client);
+  await scheduleActiveGiveaways(client);
   console.log(`KILLA FAMQ запущен как ${client.user.tag}.`);
 }
 
