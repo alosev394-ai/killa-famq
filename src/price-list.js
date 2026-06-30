@@ -7,17 +7,18 @@ import {
 
 const DIVIDER = '━━━━━━━━━━━━━━━━━━';
 const FALLBACK_PRICE_MESSAGE_ID = '1520338343726940202';
+const CURRENT_PRICE_LIST_VERSION = 2;
 
 export const PRICE_CATEGORY_CHOICES = Object.freeze([
-  { name: '🖼️ ИСКОПАЕМЫЕ / РЕСУРСЫ', value: 'resources' },
-  { name: '💐 ЦВЕТЫ', value: 'flowers' },
-  { name: '⬜ РАЗНОЕ', value: 'other' },
+  { name: '🏭 ОСНОВНЫЕ РЕСУРСЫ', value: 'resources' },
+  { name: '🌸 ЦВЕТЫ', value: 'flowers' },
+  { name: '💎 ДОПОЛНИТЕЛЬНЫЕ РЕСУРСЫ', value: 'additional' },
 ]);
 
 const PRICE_CATEGORY_TITLES = Object.freeze({
-  resources: '🖼️ ИСКОПАЕМЫЕ / РЕСУРСЫ 🖼️',
-  flowers: '💐 ЦВЕТЫ 💐',
-  other: '⬜ РАЗНОЕ ⬜',
+  resources: '🏭 ОСНОВНЫЕ РЕСУРСЫ 🏭',
+  flowers: '🌸 ЦВЕТЫ 🌸',
+  additional: '💎 ДОПОЛНИТЕЛЬНЫЕ РЕСУРСЫ 💎',
 });
 
 const DEFAULT_PRICE_GROUPS = Object.freeze([
@@ -25,24 +26,30 @@ const DEFAULT_PRICE_GROUPS = Object.freeze([
     id: 'resources',
     title: PRICE_CATEGORY_TITLES.resources,
     items: [
-      { emoji: '🪵', name: 'Дерево', price: '2300', money: true },
-      { emoji: '☁️', name: 'Камень', price: '4000', money: true },
+      { emoji: '🏷️', name: 'Метка', price: '4000', money: true },
+      { emoji: '🪨', name: 'Камень', price: '4200', money: true },
+      { emoji: '🌲', name: 'Дерево', price: '1800', money: true },
     ],
   },
   {
     id: 'flowers',
     title: PRICE_CATEGORY_TITLES.flowers,
     items: [
-      { emoji: '💠', name: 'Синий цветок', price: '650', money: true },
-      { emoji: '🌷', name: 'Розовый цветок', price: '650', money: true },
-      { emoji: '🌹', name: 'Красный цветок', price: '650', money: true },
+      { emoji: '🌹', name: 'Красный цветок', price: '1200', money: true },
+      { emoji: '💠', name: 'Синий цветок', price: '1100', money: true },
+      { emoji: '🌷', name: 'Розовый цветок', price: '1100', money: true },
     ],
   },
   {
-    id: 'other',
-    title: PRICE_CATEGORY_TITLES.other,
+    id: 'additional',
+    title: PRICE_CATEGORY_TITLES.additional,
     items: [
-      { emoji: '📍', name: 'Метка', price: '3500', money: false },
+      { emoji: '🥇', name: 'Золото', price: '5000', money: true },
+      { emoji: '🪙', name: 'Самородок из платины', price: '5000', money: true },
+      { emoji: '🔌', name: 'Обломки микросхем', price: '250', money: true },
+      { emoji: '📜', name: 'Старинная печать', price: '900', money: true },
+      { emoji: '🛢️', name: 'Оцинкованная канистра', price: '4500', money: true },
+      { emoji: '✨', name: 'Комок фольги', price: '1800', money: true },
     ],
   },
 ]);
@@ -52,8 +59,9 @@ const DEFAULT_PRICE_GROUPS = Object.freeze([
  * @returns {{ groups: Array<{ id: string, title: string, items: Array<{ emoji: string, name: string, price: string, money: boolean }> }>, updatedAt: string | null, updatedById: string | null }} Default price list.
  * @skill-verified
  */
-function createDefaultPriceList() {
+export function createDefaultPriceList() {
   return {
+    version: CURRENT_PRICE_LIST_VERSION,
     groups: DEFAULT_PRICE_GROUPS.map(clonePriceGroup),
     updatedAt: null,
     updatedById: null,
@@ -96,7 +104,7 @@ function clonePriceItem(item) {
  * @skill-verified
  */
 export function normalizePriceList(value) {
-  if (!value || typeof value !== 'object' || !Array.isArray(value.groups)) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.groups) || value.version !== CURRENT_PRICE_LIST_VERSION) {
     return createDefaultPriceList();
   }
 
@@ -109,6 +117,7 @@ export function normalizePriceList(value) {
   }
 
   return {
+    version: CURRENT_PRICE_LIST_VERSION,
     groups,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
     updatedById: typeof value.updatedById === 'string' ? value.updatedById : null,
@@ -124,7 +133,7 @@ export function normalizePriceList(value) {
 function normalizePriceGroup(value) {
   const group = value && typeof value === 'object' ? value : {};
   const rawId = 'id' in group && typeof group.id === 'string' ? group.id : 'other';
-  const id = PRICE_CATEGORY_TITLES[rawId] ? rawId : 'other';
+  const id = PRICE_CATEGORY_TITLES[rawId] ? rawId : 'additional';
   const title = 'title' in group && typeof group.title === 'string' && group.title.trim()
     ? group.title.trim()
     : PRICE_CATEGORY_TITLES[id];
@@ -411,7 +420,7 @@ function findPriceItem(priceList, itemName) {
  * @skill-verified
  */
 function ensurePriceGroup(priceList, categoryId) {
-  const safeCategoryId = PRICE_CATEGORY_TITLES[categoryId] ? categoryId : 'other';
+  const safeCategoryId = PRICE_CATEGORY_TITLES[categoryId] ? categoryId : 'additional';
   const existingGroup = priceList.groups.find((group) => group.id === safeCategoryId);
 
   if (existingGroup) {

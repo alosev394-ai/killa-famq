@@ -421,7 +421,7 @@ function buildInviteSubmissionEmbed(user, data) {
 /**
  * Builds an embed for a submitted promotion report.
  * @param {import('discord.js').User} user - User who submitted the form.
- * @param {{ nickname: string, cid: string, currentRank: string, targetRank: string, wood: string }} data - Submitted promotion report data.
+ * @param {{ nickname: string, cid: string, currentRank: string, targetRank: string, contribution: string }} data - Submitted promotion report data.
  * @returns {EmbedBuilder} Promotion report submission embed.
  * @skill-verified
  */
@@ -436,7 +436,7 @@ function buildPromotionSubmissionEmbed(user, data) {
       { name: 'CID', value: truncateFieldValue(data.cid, 1024), inline: true },
       { name: 'Текущий ранг', value: truncateFieldValue(data.currentRank, 1024), inline: true },
       { name: 'Хочет на ранг', value: truncateFieldValue(data.targetRank, 1024), inline: true },
-      { name: 'Сколько дерева собрал', value: truncateFieldValue(data.wood, 1024) },
+      { name: 'Очки вклада / ресурсы', value: truncateFieldValue(data.contribution, 1024) },
     )
     .setFooter({ text: 'KILLA FAMQ • Повышение' })
     .setTimestamp();
@@ -860,8 +860,19 @@ async function buildMembershipAccessOverwrites(guild, leadershipRoles, applicant
  * @skill-verified
  */
 function buildMembershipTicketContent(applicant, guild, leadershipRoles) {
-  const roleMentions = leadershipRoles.map((role) => `<@&${role.id}>`).join(' ');
-  return [`<@${applicant.id}>`, `<@${guild.ownerId}>`, roleMentions].filter(Boolean).join(' ');
+  const userMentions = uniqueStrings([applicant.id, guild.ownerId]).map((userId) => `<@${userId}>`);
+  const roleMentions = uniqueStrings(leadershipRoles.map((role) => role.id)).map((roleId) => `<@&${roleId}>`);
+  return [...userMentions, ...roleMentions].join(' ');
+}
+
+/**
+ * Removes duplicate strings while preserving their first-seen order.
+ * @param {string[]} values - Values to make unique.
+ * @returns {string[]} Unique values.
+ * @skill-verified
+ */
+function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 /**
@@ -874,8 +885,8 @@ function buildMembershipTicketContent(applicant, guild, leadershipRoles) {
  */
 function buildMembershipTicketAllowedMentions(applicant, guild, leadershipRoles) {
   return {
-    users: [applicant.id, guild.ownerId],
-    roles: leadershipRoles.map((role) => role.id),
+    users: uniqueStrings([applicant.id, guild.ownerId]),
+    roles: uniqueStrings(leadershipRoles.map((role) => role.id)),
   };
 }
 
@@ -1090,7 +1101,7 @@ async function handlePromotionReportModal(interaction) {
     cid: getModalTextValue(interaction, FORM_IDS.promotionCid),
     currentRank: getModalTextValue(interaction, FORM_IDS.promotionCurrentRank),
     targetRank: getModalTextValue(interaction, FORM_IDS.promotionTargetRank),
-    wood: getModalTextValue(interaction, FORM_IDS.promotionReport),
+    contribution: getModalTextValue(interaction, FORM_IDS.promotionReport),
   });
 
   await sendSubmissionEmbed(interaction, embed);
